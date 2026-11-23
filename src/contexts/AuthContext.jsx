@@ -1,68 +1,91 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { authService } from '@/services/auth/authService'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { authService, takeAuthReturnPath } from '@/services/auth/authService'
+import { SESSION_ENDED_EVENT } from '@/services/api/apiClient'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(() => authService.loadSession())
-  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState(null)
 
-  const signInWithRole = useCallback(async (role, profile = {}) => {
-    setLoading(true)
-    try {
-      const user = await authService.signInWithRole(role, profile)
-      const next = { user, token: user.token, isMock: true }
-      authService.saveSession(next)
-      setSession(next)
-      return next
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (!user?.id) return undefined
+    const sessionEnded = () => {
+      setUser(null)
+      setAuthError({
+        code: 'SESSION_ENDED',
+        message: 'เซสชันนี้ใช้ไม่ได้แล้ว กรุณาเข้าสู่ระบบใหม่',
+      })
     }
-  }, [])
+    window.addEventListener(SESSION_ENDED_EVENT, sessionEnded)
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, sessionEnded)
+  }, [user?.id])
 
-  const signInWithGoogle = useCallback(async (role) => {
-    setLoading(true)
-    try {
-      const user = await authService.signInWithGoogle(role)
-      const next = { user, token: user.token, isMock: true }
-      authService.saveSession(next)
-      setSession(next)
-      return next
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadUser() {
+      try {
+        const currentUser = await authService.fetchCurrentUser({ signal: controller.signal })
+        if (controller.signal.aborted) return
+        setUser(currentUser)
+        const returnTo = takeAuthReturnPath(currentUser)
+        if (returnTo) navigate(returnTo, { replace: true })
+      } catch (error) {
+        if (!controller.signal.aborted && error.status !== 401) setAuthError(error)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
     }
+    loadUser()
+    return () => controller.abort()
+    // Restore the cookie session once on mount, including after the OAuth redirect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const signOut = useCallback(async () => {
     await authService.signOut()
-    authService.saveSession(null)
-    setSession(null)
+    setUser(null)
+  }, [])
+
+  const signInAdmin = useCallback(async (username, password) => {
+    const currentUser = await authService.signInAdmin(username, password)
+    setAuthError(null)
+    setUser(currentUser)
+  }, [])
+
+  const signInPassword = useCallback(async (email, password) => {
+    const currentUser = await authService.signInPassword(email, password)
+    setAuthError(null)
+    setUser(currentUser)
+  }, [])
+
+  const registerPassword = useCallback(async (account) => {
+    const currentUser = await authService.registerPassword(account)
+    setAuthError(null)
+    setUser(currentUser)
   }, [])
 
   const updateUser = useCallback((patch) => {
-    setSession((current) => {
-      if (!current) return current
-      const next = { ...current, user: { ...current.user, ...patch } }
-      authService.saveSession(next)
-      return next
-    })
+    setUser((current) => current && { ...current, ...patch })
   }, [])
 
-  const value = useMemo(
-    () => ({
-      user: session?.user || null,
-      isAuthenticated: Boolean(session?.user),
-      isMock: Boolean(session?.isMock),
-      role: session?.user?.role || null,
-      profileId: session?.user?.profileId || null,
-      loading,
-      signInWithRole,
-      signInWithGoogle,
-      signOut,
-      updateUser,
-    }),
-    [session, loading, signInWithRole, signInWithGoogle, signOut, updateUser],
-  )
+  const value = useMemo(() => ({
+    user,
+    isAuthenticated: Boolean(user),
+    role: user?.role || null,
+    profileId: user?.profileId || null,
+    loading,
+    authError,
+    signInWithGoogle: authService.signInWithGoogle,
+    signInAdmin,
+    signInPassword,
+    registerPassword,
+    signOut,
+    updateUser,
+  }), [user, loading, authError, signOut, signInAdmin, signInPassword, registerPassword, updateUser])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

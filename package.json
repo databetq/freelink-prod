@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "init:admin": "node scripts/init-admin.js",
+    "add:admin": "node scripts/init-admin.js --add"
   },
   "dependencies": {
     "@react-three/drei": "9.114.3",

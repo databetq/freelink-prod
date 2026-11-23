@@ -43,7 +43,7 @@ export default function FreelancerDashboard() {
     () => proposalService.listByFreelancer(profileId),
     [profileId],
   )
-  const { data: transactions } = useAsync(() => transactionService.list(user?.id), [user?.id])
+  const { data: transactions, error: transactionError } = useAsync(() => transactionService.list(user?.id), [user?.id])
   const { data: openJobs, loading: jobsLoading } = useAsync(
     () => jobService.listJobs({ status: 'open' }),
     [],
@@ -98,9 +98,6 @@ export default function FreelancerDashboard() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-6" title="โหมดข้อมูลจำลอง">
-        รายได้ ข้อเสนอ และโครงการในหน้านี้เป็น mock data — ยังไม่เชื่อมต่อ Backend หรือ Smart Contract
-      </InfoBanner>
 
       <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-ink/[0.07] bg-white p-4">
         <Avatar name={user?.name || 'F'} color={user?.avatarColor} size="lg" />
@@ -129,14 +126,14 @@ export default function FreelancerDashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="รายได้ที่ยืนยันแล้ว"
-          value={formatCurrency(stats.earnings, { compact: true })}
-          hint="จากธุรกรรม mock"
+          value={transactions ? formatCurrency(stats.earnings, { compact: true }) : '—'}
+          hint={transactionError ? transactionError.message : 'จากประวัติธุรกรรม'}
           icon={Wallet}
           tone="emerald"
         />
         <StatCard
           label="เงินรอปล่อยจาก Escrow"
-          value={formatCurrency(stats.inEscrow, { compact: true })}
+          value={projectList.some((project) => project.escrowAmount != null) ? formatCurrency(stats.inEscrow, { compact: true }) : '—'}
           hint="จะได้รับเมื่อลูกค้าอนุมัติ"
           icon={TrendingUp}
           tone="brand"
@@ -278,7 +275,7 @@ export default function FreelancerDashboard() {
               </Link>
             </div>
             <p className="mt-2 text-2xl font-extrabold tracking-tight text-ink">
-              {formatCurrency(stats.earnings)}
+              {transactions ? formatCurrency(stats.earnings) : '—'}
             </p>
             <p className="text-[11px] text-ink-500">ยอดรวมจากธุรกรรมที่ยืนยันแล้ว</p>
             <ul className="mt-3 divide-y divide-ink/[0.06]">
@@ -289,12 +286,12 @@ export default function FreelancerDashboard() {
                   <li key={tx.id} className="flex items-center justify-between gap-2 py-2.5">
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-medium text-ink">{tx.note}</p>
-                      <p className="text-[9.5px] text-ink-400">{tx.isMock ? 'mock ledger' : 'on-chain'}</p>
+                      <p className="text-[9.5px] text-ink-400">{tx.hash ? 'on-chain' : 'รอยืนยัน'}</p>
                     </div>
                     <span className="shrink-0 text-[11px] font-bold text-ink">{formatCurrency(tx.amount)}</span>
                   </li>
                 ))}
-              {txList.filter((tx) => tx.userId === user?.id).length === 0 && (
+              {transactions && txList.filter((tx) => tx.userId === user?.id).length === 0 && (
                 <li className="py-2 text-[11px] text-ink-400">ยังไม่มีรายได้ที่ยืนยันแล้ว</li>
               )}
             </ul>

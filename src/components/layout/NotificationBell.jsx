@@ -1,28 +1,9 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bell } from 'lucide-react'
-import { useAuth } from '@/contexts/AuthContext'
-import { notificationService } from '@/services/api/notificationService'
+import { useNotifications } from '@/contexts/NotificationContext'
 
 export function NotificationBell() {
-  const { role } = useAuth()
-  const [unread, setUnread] = useState(0)
-
-  useEffect(() => {
-    let active = true
-    if (!role) return undefined
-    notificationService
-      .list(role)
-      .then((items) => {
-        if (active) setUnread(items.filter((item) => !item.read).length)
-      })
-      .catch(() => {
-        if (active) setUnread(0)
-      })
-    return () => {
-      active = false
-    }
-  }, [role])
+  const { unread } = useNotifications()
 
   return (
     <Link

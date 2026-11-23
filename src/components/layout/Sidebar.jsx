@@ -3,7 +3,7 @@ import { ShieldCheck, X } from 'lucide-react'
 import { Logo } from './Logo'
 import { Avatar } from '@/components/common/Avatar'
 import { useAuth } from '@/contexts/AuthContext'
-import { adminNav, clientNav, freelancerNav, sharedNav } from '@/constants'
+import { dashboardNavigation } from '@/constants'
 import { cn } from '@/utils/cn'
 
 function NavItem({ item, onNavigate }) {
@@ -39,7 +39,7 @@ function NavItem({ item, onNavigate }) {
 
 export function Sidebar({ onNavigate, onClose, mobile = false, className }) {
   const { user, role } = useAuth()
-  const primaryNav = role === 'client' ? clientNav : freelancerNav
+  const navigation = dashboardNavigation[role]
 
   return (
     <aside
@@ -70,59 +70,47 @@ export function Sidebar({ onNavigate, onClose, mobile = false, className }) {
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-white">{user?.displayName || user?.name}</p>
             <p className="text-[10px] uppercase tracking-wide text-white/40">
-              {role === 'client' ? 'Client workspace' : 'Freelancer workspace'}
+              {navigation?.workspace}
             </p>
           </div>
         </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-5 scrollbar-thin" aria-label="เมนูหลัก">
-        <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
-          {role === 'client' ? 'การจ้างงาน' : 'งานของฉัน'}
-        </p>
-        <div className="space-y-0.5">
-          {primaryNav.map((item) => (
-            <NavItem key={item.to} item={item} onNavigate={onNavigate} />
-          ))}
-        </div>
-
-        <p className="px-3 pb-2 pt-6 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
-          บัญชี & เครื่องมือ
-        </p>
-        <div className="space-y-0.5">
-          {sharedNav.map((item) => (
-            <NavItem key={item.to} item={item} onNavigate={onNavigate} />
-          ))}
-        </div>
-
-        <p className="px-3 pb-2 pt-6 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
-          Demo admin
-        </p>
-        <div className="space-y-0.5">
-          {adminNav.map((item) => (
-            <NavItem key={item.to} item={item} onNavigate={onNavigate} />
-          ))}
-        </div>
+        {navigation?.sections.map(({ label, items }) => (
+          <div key={label} className="mt-6 first:mt-0">
+            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/30">
+              {label}
+            </p>
+            <div className="space-y-0.5">
+              {items.map((item) => (
+                <NavItem key={item.to} item={item} onNavigate={onNavigate} />
+              ))}
+            </div>
+          </div>
+        ))}
       </nav>
 
-      <div className="border-t border-white/[0.08] p-3">
-        <Link
-          to="/wallet"
-          onClick={onNavigate}
-          className="group block overflow-hidden rounded-xl border border-brand-400/20 bg-gradient-to-br from-brand-600/25 to-violet-600/10 p-3.5 transition hover:border-brand-400/40"
-        >
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-brand-200">
-            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-            Escrow protection
-          </div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-white/45">
-            เงินถูกเก็บในสัญญาและปล่อยเมื่อตรวจรับงาน
-          </p>
-          <span className="mt-2 inline-flex text-[10px] font-semibold text-white/70 transition group-hover:text-white">
-            ดูสถานะกระเป๋าเงิน →
-          </span>
-        </Link>
-      </div>
+      {navigation?.marketplaceTools && (
+        <div className="border-t border-white/[0.08] p-3">
+          <Link
+            to="/wallet"
+            onClick={onNavigate}
+            className="group block overflow-hidden rounded-xl border border-brand-400/20 bg-gradient-to-br from-brand-600/25 to-violet-600/10 p-3.5 transition hover:border-brand-400/40"
+          >
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-brand-200">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+              Escrow protection
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-white/45">
+              เงินถูกเก็บในสัญญาและปล่อยเมื่อตรวจรับงาน
+            </p>
+            <span className="mt-2 inline-flex text-[10px] font-semibold text-white/70 transition group-hover:text-white">
+              ดูสถานะกระเป๋าเงิน →
+            </span>
+          </Link>
+        </div>
+      )}
     </aside>
   )
 }

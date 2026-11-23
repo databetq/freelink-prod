@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AnimatePresence } from 'framer-motion'
-import { CalendarDays, Check, FileText, Lightbulb, Plus, Save, Send, X } from 'lucide-react'
+import { CalendarDays, Check, FileText, Lightbulb, Save, Send } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { useAsync } from '@/hooks/useAsync'
@@ -10,12 +9,20 @@ import { jobService } from '@/services/api/jobService'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/common/Button'
 import { Input, Select, Textarea } from '@/components/common/FormField'
-import { InfoBanner } from '@/components/common/InfoBanner'
+import { SkillPicker } from '@/components/common/SkillPicker'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PageLoader } from '@/components/common/LoadingSkeleton'
-import { categories, categoryMap, experienceLevels } from '@/constants'
-import { formatCurrency } from '@/utils/format'
-import { validate, minLength, required } from '@/utils/validators'
+import {
+  allSkills,
+  categories,
+  categoryMap,
+  commonSkills,
+  durationOptions,
+  experienceLevels,
+  skillCatalog,
+} from '@/constants'
+import { formatCurrency, todayISODate } from '@/utils/format'
+import { validate, minLength, positiveNumber, required } from '@/utils/validators'
 import { cn } from '@/utils/cn'
 
 const emptyValues = {
@@ -26,9 +33,13 @@ const emptyValues = {
   budgetMin: '',
   budgetMax: '',
   duration: '',
+  customDuration: '',
   experience: 'intermediate',
   deadline: '',
 }
+
+// Select value that reveals the free-text field for lengths not in the preset list.
+const CUSTOM_DURATION = '__custom__'
 
 export default function CreateJob() {
   const { jobId } = useParams()
@@ -45,7 +56,6 @@ export default function CreateJob() {
 
   const [values, setValues] = useState(emptyValues)
   const [skills, setSkills] = useState([])
-  const [skillInput, setSkillInput] = useState('')
   const [deliverables, setDeliverables] = useState('')
   const [errors, setErrors] = useState({})
   const [busy, setBusy] = useState(null)
@@ -54,6 +64,8 @@ export default function CreateJob() {
   useEffect(() => {
     if (!existing || hydrated.current) return
     hydrated.current = true
+    const savedDuration = existing.duration || ''
+    const isPreset = !savedDuration || durationOptions.includes(savedDuration)
     setValues({
       title: existing.title || '',
       category: existing.category || '',
@@ -61,7 +73,8 @@ export default function CreateJob() {
       budgetType: existing.budgetType || 'fixed',
       budgetMin: String(existing.budgetMin || ''),
       budgetMax: String(existing.budgetMax || ''),
-      duration: existing.duration || '',
+      duration: isPreset ? savedDuration : CUSTOM_DURATION,
+      customDuration: isPreset ? '' : savedDuration,
       experience: existing.experience || 'intermediate',
       deadline: existing.deadline ? existing.deadline.slice(0, 10) : '',
     })
@@ -79,35 +92,47 @@ export default function CreateJob() {
     })
   }
 
-  const addSkill = () => {
-    const value = skillInput.trim().replace(/,$/, '')
-    if (!value) return
-    if (!skills.some((skill) => skill.toLowerCase() === value.toLowerCase())) {
-      setSkills((current) => [...current, value])
-      setErrors((current) => {
-        const next = { ...current }
-        delete next.skills
-        return next
-      })
-    }
-    setSkillInput('')
+  const updateSkills = (next) => {
+    setSkills(next)
+    setErrors((current) => {
+      if (!current.skills || next.length === 0) return current
+      const rest = { ...current }
+      delete rest.skills
+      return rest
+    })
   }
+
+  const resolvedDuration =
+    values.duration === CUSTOM_DURATION ? values.customDuration.trim() : values.duration
+  const today = todayISODate()
+  const originalDeadline = existing?.deadline ? existing.deadline.slice(0, 10) : ''
 
   const runValidation = () => {
     const base = validate(values, {
       title: [required('ชื่อประกาศ'), minLength(10, 'ชื่อประกาศ')],
       category: [required('หมวดหมู่')],
       description: [required('รายละเอียดงาน'), minLength(40, 'รายละเอียดงาน')],
-      budgetMin: [required('งบประมาณขั้นต่ำ')],
+      budgetMin: [required('งบประมาณขั้นต่ำ'), positiveNumber('งบประมาณขั้นต่ำ')],
       budgetMax: [
         required('งบประมาณสูงสุด'),
+        positiveNumber('งบประมาณสูงสุด'),
         (value) =>
           Number(value) < Number(values.budgetMin)
             ? 'งบประมาณสูงสุดต้องไม่น้อยกว่าขั้นต่ำ'
             : null,
       ],
       duration: [required('ระยะเวลางาน')],
+      // An unchanged deadline on an old posting stays valid so other fields can still be edited.
+      deadline: [
+        (value) =>
+          value && value < today && value !== originalDeadline
+            ? 'กำหนดส่งต้องไม่เป็นวันที่ผ่านมาแล้ว'
+            : null,
+      ],
     })
+    if (values.duration === CUSTOM_DURATION && !resolvedDuration) {
+      base.duration = 'กรุณาระบุระยะเวลางาน'
+    }
     if (skills.length === 0) base.skills = 'เพิ่มทักษะอย่างน้อย 1 รายการ'
     setErrors(base)
     return Object.keys(base).length === 0
@@ -127,7 +152,7 @@ export default function CreateJob() {
       budgetType: values.budgetType,
       budgetMin: Number(values.budgetMin),
       budgetMax: Number(values.budgetMax),
-      duration: values.duration.trim(),
+      duration: resolvedDuration,
       experience: values.experience,
       deadline: values.deadline ? new Date(values.deadline).toISOString() : null,
       deliverables: deliverables
@@ -140,16 +165,18 @@ export default function CreateJob() {
     try {
       if (isEdit) {
         await jobService.updateJob(jobId, payload)
-        toast.success('บันทึกการแก้ไขแล้ว', 'ข้อมูลถูกอัปเดตใน mock data ภายในเบราว์เซอร์')
+        toast.success('บันทึกการแก้ไขแล้ว', 'บันทึกข้อมูลประกาศงานแล้ว')
       } else {
         await jobService.createJob(payload, profileId)
         toast.success(
           status === 'draft' ? 'บันทึกฉบับร่างแล้ว' : 'เผยแพร่ประกาศงานแล้ว',
-          'ประกาศนี้เป็นข้อมูลจำลอง — ยังไม่ถูกส่งไปยัง Backend',
+          'บันทึกประกาศงานบนเซิร์ฟเวอร์แล้ว',
         )
       }
       navigate('/client/jobs')
     } catch (error) {
+      if (error.code === 'INVALID_DEADLINE') setErrors({ deadline: error.message })
+      if (error.code === 'INVALID_BUDGET') setErrors({ budgetMax: error.message })
       toast.error('บันทึกไม่สำเร็จ', error.message)
     } finally {
       setBusy(null)
@@ -158,6 +185,11 @@ export default function CreateJob() {
 
   const previewCategory = useMemo(
     () => categoryMap[values.category],
+    [values.category],
+  )
+
+  const suggestedSkills = useMemo(
+    () => (values.category ? [...(skillCatalog[values.category] || []), ...commonSkills] : []),
     [values.category],
   )
 
@@ -196,7 +228,7 @@ export default function CreateJob() {
   const checklist = [
     { label: 'ชื่อและหมวดหมู่งานชัดเจน', done: values.title.trim().length >= 10 && values.category },
     { label: 'อธิบายขอบเขตงานครบถ้วน', done: values.description.trim().length >= 40 },
-    { label: 'ระบุงบประมาณและระยะเวลา', done: values.budgetMin && values.budgetMax && values.duration },
+    { label: 'ระบุงบประมาณและระยะเวลา', done: values.budgetMin && values.budgetMax && resolvedDuration },
     { label: 'มีทักษะที่ต้องการอย่างน้อย 1 อย่าง', done: skills.length > 0 },
   ]
 
@@ -249,50 +281,17 @@ export default function CreateJob() {
                 hint="อย่างน้อย 40 ตัวอักษร — ยิ่งละเอียดยิ่งได้ข้อเสนอที่ตรง"
                 required
               />
-              <div>
-                <p className="field-label">
-                  ทักษะที่ต้องการ <span className="text-rose-500">*</span>
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    value={skillInput}
-                    onChange={(event) => setSkillInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ',') {
-                        event.preventDefault()
-                        addSkill()
-                      }
-                    }}
-                    placeholder="พิมพ์ทักษะแล้วกด Enter"
-                    className={cn('field-control', errors.skills && 'field-error')}
-                    aria-label="เพิ่มทักษะ"
-                  />
-                  <Button type="button" variant="secondary" size="md" onClick={addSkill} icon={Plus}>
-                    เพิ่ม
-                  </Button>
-                </div>
-                {errors.skills && <p className="mt-1.5 text-xs font-medium text-rose-600">{errors.skills}</p>}
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  <AnimatePresence initial={false}>
-                    {skills.map((skill) => (
-                      <span
-                        key={skill}
-                        className="inline-flex items-center gap-1 rounded-lg border border-brand-100 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700"
-                      >
-                        {skill}
-                        <button
-                          type="button"
-                          onClick={() => setSkills((current) => current.filter((item) => item !== skill))}
-                          className="rounded p-0.5 transition hover:bg-brand-100"
-                          aria-label={`ลบทักษะ ${skill}`}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </div>
+              <SkillPicker
+                label="ทักษะที่ต้องการ"
+                required
+                value={skills}
+                onChange={updateSkills}
+                suggestions={suggestedSkills}
+                catalog={allSkills}
+                suggestionsLabel={`แนะนำสำหรับ${previewCategory?.label || 'งานนี้'}`}
+                emptyHint="เลือกหมวดหมู่ก่อนเพื่อดูทักษะที่แนะนำ หรือพิมพ์ค้นหาได้เลย"
+                error={errors.skills}
+              />
             </div>
           </section>
 
@@ -352,20 +351,23 @@ export default function CreateJob() {
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <Input
-                label="งบประมาณขั้นต่ำ (บาท)"
+                label={values.budgetType === 'hourly' ? 'อัตราต่อชั่วโมงขั้นต่ำ (บาท)' : 'งบประมาณขั้นต่ำ (บาท)'}
                 type="number"
-                min="0"
-                placeholder="45000"
+                min="1"
+                step="1"
+                placeholder="เช่น 15000"
+                hint="ระบุเท่าไรก็ได้ แต่ต้องมากกว่า 0"
                 value={values.budgetMin}
                 onChange={(event) => setField('budgetMin', event.target.value)}
                 error={errors.budgetMin}
                 required
               />
               <Input
-                label="งบประมาณสูงสุด (บาท)"
+                label={values.budgetType === 'hourly' ? 'อัตราต่อชั่วโมงสูงสุด (บาท)' : 'งบประมาณสูงสุด (บาท)'}
                 type="number"
-                min="0"
-                placeholder="60000"
+                min="1"
+                step="1"
+                placeholder="เช่น 30000"
                 value={values.budgetMax}
                 onChange={(event) => setField('budgetMax', event.target.value)}
                 error={errors.budgetMax}
@@ -374,19 +376,41 @@ export default function CreateJob() {
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Input
-                label="ระยะเวลางาน"
-                placeholder="เช่น 2-3 สัปดาห์"
-                value={values.duration}
-                onChange={(event) => setField('duration', event.target.value)}
-                error={errors.duration}
-                required
-              />
+              <div className="space-y-3">
+                <Select
+                  label="ระยะเวลางาน"
+                  value={values.duration}
+                  onChange={(event) => setField('duration', event.target.value)}
+                  error={values.duration === CUSTOM_DURATION ? undefined : errors.duration}
+                  required
+                >
+                  <option value="">เลือกระยะเวลา</option>
+                  {durationOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_DURATION}>อื่น ๆ (ระบุเอง)</option>
+                </Select>
+                {values.duration === CUSTOM_DURATION && (
+                  <Input
+                    aria-label="ระบุระยะเวลางาน"
+                    placeholder="เช่น 10 วัน หรือ 8 เดือน"
+                    maxLength={100}
+                    value={values.customDuration}
+                    onChange={(event) => setField('customDuration', event.target.value)}
+                    error={errors.duration}
+                  />
+                )}
+              </div>
               <Input
                 label="กำหนดส่ง"
                 type="date"
+                min={today}
+                hint="ไม่บังคับ — เลือกวันนี้หรือวันหลังจากนี้"
                 value={values.deadline}
                 onChange={(event) => setField('deadline', event.target.value)}
+                error={errors.deadline}
                 prefix={null}
               />
             </div>
@@ -422,7 +446,7 @@ export default function CreateJob() {
               </p>
               <p className="mt-2 inline-flex items-center gap-1 text-[10.5px] text-ink-500">
                 <CalendarDays className="h-3 w-3" />
-                {values.duration || 'ยังไม่ระบุระยะเวลา'}
+                {resolvedDuration || 'ยังไม่ระบุระยะเวลา'}
               </p>
             </div>
           </div>
@@ -483,10 +507,6 @@ export default function CreateJob() {
             </Button>
           </div>
 
-          <InfoBanner tone="warning" className="mt-4" title="ข้อมูลจำลอง">
-            การเผยแพร่จะบันทึกใน mock database ของเบราว์เซอร์เท่านั้น
-            ยังไม่มีการเรียก API หรือแจ้งเตือนฟรีแลนซ์จริง
-          </InfoBanner>
         </aside>
       </div>
 

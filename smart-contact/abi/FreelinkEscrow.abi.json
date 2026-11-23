@@ -164,6 +164,11 @@
   },
   {
     "inputs": [],
+    "name": "TermsMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "TransferFailed",
     "type": "error"
   },
@@ -639,6 +644,16 @@
         "internalType": "bytes32",
         "name": "termsHash",
         "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "expectedAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint64",
+        "name": "expectedDeadline",
+        "type": "uint64"
       }
     ],
     "name": "acceptEscrow",

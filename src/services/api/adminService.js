@@ -1,27 +1,33 @@
-import { appConfig } from '@/config/appConfig'
-import * as mock from '@/services/mocks/mockAdminService'
 import { apiClient, assertApiConfigured } from './apiClient'
 
-/**
- * Admin UI is a demonstration only — no admin backend exists in this project.
- * Real endpoint paths must be agreed with the backend team before enabling.
- */
 export const adminService = {
   getOverview() {
-    if (appConfig.useMockApi) return mock.getAdminOverview()
     assertApiConfigured()
-    return apiClient.get('/admin/overview').then((r) => r.data) // TODO(api): confirm path
+    return apiClient.get('/admin/overview').then((r) => r.data)
   },
 
-  updateUserStatus(id, status) {
-    if (appConfig.useMockApi) return mock.updateUserStatus(id, status)
+  updateUserStatus(id, status, reason) {
     assertApiConfigured()
-    return apiClient.patch(`/admin/users/${id}`, { status }).then((r) => r.data) // TODO(api)
+    return apiClient.patch(`/admin/users/${id}`, { status, reason }).then((r) => r.data)
+  },
+
+  getModerationHistory(id) {
+    assertApiConfigured()
+    return apiClient.get(`/admin/users/${id}/moderation`).then((r) => r.data)
+  },
+
+  addNotice(id, kind, reason) {
+    assertApiConfigured()
+    return apiClient.post(`/admin/users/${id}/notices`, { kind, reason }).then((r) => r.data)
   },
 
   resolveReport(id, status) {
-    if (appConfig.useMockApi) return mock.resolveReport(id, status)
     assertApiConfigured()
-    return apiClient.patch(`/admin/reports/${id}`, { status }).then((r) => r.data) // TODO(api)
+    return apiClient.patch(`/admin/reports/${id}`, { status }).then((r) => r.data)
+  },
+
+  getReportProject(id) {
+    assertApiConfigured()
+    return apiClient.get(`/admin/reports/${id}/project`).then((response) => response.data)
   },
 }

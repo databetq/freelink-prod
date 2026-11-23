@@ -18,7 +18,7 @@ import { Button } from '@/components/common/Button'
 import { FaqAccordion } from '@/components/common/FaqAccordion'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
-import { faqs } from '@/data/mockData'
+import { faqs } from '@/data/faqs'
 import { getMissingContractConfig, contractConfig, isContractConfigured } from '@/config/contractConfig'
 import { cn } from '@/utils/cn'
 
@@ -138,7 +138,7 @@ export default function HowItWorks() {
           </div>
           <div className="mt-6">
             <Button to="/client/jobs/new" variant="secondary" size="sm" iconRight={ArrowRight}>
-              ลองสร้างประกาศงาน (Demo)
+              สร้างประกาศงาน
             </Button>
           </div>
         </div>
@@ -267,11 +267,6 @@ export default function HowItWorks() {
                 title="คำถามที่พบบ่อย"
                 description="เรื่องที่ลูกค้าและฟรีแลนซ์ถามบ่อยเกี่ยวกับการทำงานและการชำระเงิน"
               />
-              <InfoBanner tone="warning" className="mt-6" title="สถานะโปรเจกต์">
-                นี่คือ Frontend ที่ใช้ mock data — ยังไม่มีการเชื่อมต่อ Backend หรือ
-                Smart Contract จริง หน้าจอที่เกี่ยวกับเงินจะแสดงสถานะ “ยังไม่เชื่อมต่อ”
-                จนกว่าทีมจะส่งข้อมูลมา
-              </InfoBanner>
               <Link
                 to="/help"
                 className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-700 hover:underline"
@@ -299,7 +294,7 @@ export default function HowItWorks() {
             </p>
             <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
               <Button to="/register" variant="brand" size="md" iconRight={ArrowRight}>
-                สร้างบัญชี demo
+                สร้างบัญชี
               </Button>
               <Button to="/jobs" variant="secondary" size="md">
                 ดูประกาศงาน

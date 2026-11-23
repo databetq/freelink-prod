@@ -2,10 +2,6 @@ import { useRef, useState } from 'react'
 import { FileText, UploadCloud, X } from 'lucide-react'
 import { cn } from '@/utils/cn'
 
-/**
- * Files are kept in browser memory only. There is no upload endpoint yet, so the
- * UI never claims a file was uploaded to the server.
- */
 export function FileUploadArea({ files = [], onFilesChange, label = 'แนบไฟล์งาน', hint, className }) {
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)

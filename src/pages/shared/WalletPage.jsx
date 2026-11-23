@@ -22,6 +22,7 @@ import { contractConfig, getMissingContractConfig, isContractConfigured } from '
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/common/Button'
 import { WalletConnectButton } from '@/components/wallet/WalletConnectButton'
+import { WalletLinkPanel } from '@/components/wallet/WalletLinkPanel'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -45,6 +46,9 @@ export default function WalletPage() {
 
   const missing = getMissingContractConfig()
   const configured = isContractConfigured()
+  const hasEscrowEvents = contractConfig.abi.some(
+    (entry) => entry.type === 'event' && entry.name === 'EscrowFunded',
+  )
 
   useEffect(() => {
     let active = true
@@ -57,7 +61,7 @@ export default function WalletPage() {
     return () => {
       active = false
     }
-  }, [wallet.isConnected, wallet.address])
+  }, [wallet.isConnected, wallet.address, wallet.chainId])
 
   return (
     <div>
@@ -68,9 +72,10 @@ export default function WalletPage() {
         actions={<WalletConnectButton size="md" />}
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="สถานะการเชื่อมต่อ">
-        การเชื่อมต่อ Wallet ทำงานกับ provider จริงในเบราว์เซอร์ของคุณ
-        แต่ธุรกรรม escrow จะยังไม่ทำงานจนกว่าจะได้รับ ABI, Contract Address และ Chain ID จากทีม
+      <InfoBanner tone={wallet.isWrongNetwork ? 'warning' : 'info'} className="mb-5" title="สถานะการเชื่อมต่อ">
+        {wallet.isConnected ? 'เชื่อมต่อ Wallet แล้ว' : 'เชื่อมต่อ Wallet เพื่อดูยอดเงินและเครือข่ายปัจจุบัน'}
+        {wallet.isWrongNetwork ? ` กรุณาสลับไป ${contractConfig.chainName}` : ''}
+        {configured && !wallet.isWrongNetwork && ` ตั้งค่า Escrow สำหรับ ${contractConfig.chainName} แล้ว`}
       </InfoBanner>
 
       <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
@@ -226,16 +231,17 @@ export default function WalletPage() {
         </div>
 
         <div className="space-y-4">
+          {user && user.role !== 'admin' && <WalletLinkPanel key={user.id} userId={user.id} />}
           <section className="card p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold">Smart Contract readiness</h2>
               <span
                 className={cn(
                   'rounded-full px-2 py-0.5 text-[9px] font-bold',
-                  configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700',
+                  missing.length === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700',
                 )}
               >
-                {configured ? 'READY' : 'PENDING'}
+                {missing.length === 0 ? 'ตั้งค่าครบ' : 'รอตั้งค่า'}
               </span>
             </div>
 
@@ -246,7 +252,7 @@ export default function WalletPage() {
                 { label: 'ABI', ready: Array.isArray(contractConfig.abi) && contractConfig.abi.length > 0 },
                 { label: 'Escrow currency', ready: Boolean(contractConfig.currency.type) },
                 { label: 'Function names', ready: Boolean(contractConfig.methods.depositEscrow) },
-                { label: 'Event definitions', ready: false },
+                { label: 'Event definitions', ready: hasEscrowEvents },
               ].map((item) => (
                 <li key={item.label} className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="text-ink-500">{item.label}</span>
@@ -265,8 +271,8 @@ export default function WalletPage() {
             </ul>
 
             {missing.length > 0 && (
-              <InfoBanner tone="danger" className="mt-3" title="ยังไม่สามารถทำธุรกรรมได้">
-                ต้องได้รับจากทีม Smart Contract: {missing.join(', ')}
+              <InfoBanner tone="warning" className="mt-3" title="ตั้งค่า Escrow สำหรับฝากเงินยังไม่ครบ">
+                เพิ่มค่าต่อไปนี้ในไฟล์ .env ของ frontend: {missing.join(', ')}
               </InfoBanner>
             )}
           </section>

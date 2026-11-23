@@ -16,6 +16,33 @@ export function formatWalletAddress(address, size = 4) {
   return `${address.slice(0, 2 + size)}…${address.slice(-size)}`
 }
 
+export async function readWalletConnection() {
+  const ethereum = getEthereumProvider()
+  if (!ethereum) return null
+  const accounts = await ethereum.request({ method: 'eth_accounts' })
+  if (!accounts?.length) return null
+  return { address: accounts[0], chainId: await getWalletChainId() }
+}
+
+export async function signWalletLinkMessage({ address, chainId, message }) {
+  const ethereum = getEthereumProvider()
+  if (!ethereum) throw new WalletError('ไม่พบ Wallet ในเบราว์เซอร์นี้', 'NO_PROVIDER')
+  const connection = await readWalletConnection()
+  if (!connection || connection.address.toLowerCase() !== address.toLowerCase()) {
+    throw new WalletError('บัญชี Wallet เปลี่ยนไป กรุณาเลือกบัญชีอีกครั้ง', 'WALLET_ACCOUNT_CHANGED')
+  }
+  if (connection.chainId !== chainId) {
+    throw new WalletError('เครือข่าย Wallet เปลี่ยนไป กรุณาสลับเครือข่ายแล้วลองใหม่', 'WALLET_WRONG_CHAIN')
+  }
+  try {
+    const signer = await new BrowserProvider(ethereum).getSigner(address)
+    return await signer.signMessage(message)
+  } catch (error) {
+    const normalized = normalizeWalletError(error)
+    throw new WalletError(normalized.message, normalized.code)
+  }
+}
+
 /**
  * Requests accounts from the injected wallet and reads the ACTUAL chain id.
  * Nothing is reported as connected until the wallet returns an account.

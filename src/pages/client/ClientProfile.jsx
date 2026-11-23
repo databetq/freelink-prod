@@ -12,6 +12,7 @@ import { InfoBanner } from '@/components/common/InfoBanner'
 import { ProfileCard } from '@/components/profile/ProfileCard'
 import { PageLoader } from '@/components/common/LoadingSkeleton'
 import { ErrorState } from '@/components/common/ErrorState'
+import { formatDate } from '@/utils/format'
 import { validate, emailFormat, minLength, required } from '@/utils/validators'
 import { cn } from '@/utils/cn'
 
@@ -92,7 +93,7 @@ export default function ClientProfile() {
     try {
       await profileService.updateClient(profileId, values)
       updateUser({ displayName: values.name })
-      toast.success('บันทึกโปรไฟล์แล้ว', 'ข้อมูลถูกอัปเดตใน mock database ของเบราว์เซอร์')
+      toast.success('บันทึกโปรไฟล์แล้ว', 'บันทึกการเปลี่ยนแปลงบนเซิร์ฟเวอร์แล้ว')
       refresh()
     } catch (err) {
       toast.error('บันทึกไม่สำเร็จ', err.message)
@@ -242,7 +243,7 @@ export default function ClientProfile() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-ink-500">สมาชิกตั้งแต่</span>
-                <span className="font-semibold text-ink">{client.memberSince}</span>
+                <span className="font-semibold text-ink">{formatDate(client.memberSince)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-ink-500">งานที่ประกาศ</span>
@@ -258,10 +259,6 @@ export default function ClientProfile() {
             </Button>
           </div>
 
-          <InfoBanner tone="warning" title="ข้อมูลจำลอง">
-            โปรไฟล์นี้ไม่ผูกกับระบบยืนยันตัวตนหรือฐานข้อมูลจริง
-            — การเปลี่ยนแปลงมีผลเฉพาะในเบราว์เซอร์ของคุณ
-          </InfoBanner>
         </aside>
       </form>
     </div>

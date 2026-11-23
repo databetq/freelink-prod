@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Bell,
@@ -6,20 +6,19 @@ import {
   CheckCheck,
   FileCheck2,
   FileText,
+  LifeBuoy,
   MessageSquare,
   Wallet,
 } from 'lucide-react'
-import { useAuth } from '@/contexts/AuthContext'
-import { useAsync } from '@/hooks/useAsync'
+import { useNotifications } from '@/contexts/NotificationContext'
+import { useToast } from '@/contexts/ToastContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
-import { notificationService } from '@/services/api/notificationService'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Tabs } from '@/components/common/Tabs'
 import { Button } from '@/components/common/Button'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
 import { TableSkeleton } from '@/components/common/LoadingSkeleton'
-import { InfoBanner } from '@/components/common/InfoBanner'
 import { timeAgo } from '@/utils/format'
 import { cn } from '@/utils/cn'
 
@@ -29,6 +28,7 @@ const typeIcons = {
   message: MessageSquare,
   payment: Wallet,
   job: BriefcaseBusiness,
+  support: LifeBuoy,
 }
 
 const typeTones = {
@@ -37,39 +37,32 @@ const typeTones = {
   message: 'bg-blue-50 text-blue-600',
   payment: 'bg-emerald-50 text-emerald-600',
   job: 'bg-violet-50 text-violet-600',
+  support: 'bg-brand-50 text-brand-600',
 }
 
 export default function Notifications() {
   useDocumentTitle('การแจ้งเตือน')
-  const { role } = useAuth()
-  const { data, loading, error, setData, refresh } = useAsync(
-    () => notificationService.list(role),
-    [role],
-  )
+  const { items, unread, loading, error, refresh, markRead, markAllRead } = useNotifications()
+  const toast = useToast()
   const [tab, setTab] = useState('all')
   const [marking, setMarking] = useState(false)
 
-  const items = data || []
-  const unread = useMemo(() => items.filter((item) => !item.read).length, [items])
   const filtered = items.filter((item) => (tab === 'unread' ? !item.read : true))
 
-  const markRead = async (notification) => {
-    if (notification.read) return
-    setData((current) =>
-      (current || []).map((item) => (item.id === notification.id ? { ...item, read: true } : item)),
-    )
+  const openNotification = async (notification) => {
     try {
-      await notificationService.markRead(notification.id)
-    } catch {
-      // Keep the optimistic state; the next load will reconcile with the mock db.
+      await markRead(notification)
+    } catch (error) {
+      toast.error('บันทึกสถานะอ่านไม่สำเร็จ', error.message)
     }
   }
 
   const markAll = async () => {
     setMarking(true)
     try {
-      await notificationService.markAllRead(role)
-      setData((current) => (current || []).map((item) => ({ ...item, read: true })))
+      await markAllRead()
+    } catch (error) {
+      toast.error('บันทึกสถานะอ่านไม่สำเร็จ', error.message)
     } finally {
       setMarking(false)
     }
@@ -95,9 +88,6 @@ export default function Notifications() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="ข้อมูลจำลอง">
-        การแจ้งเตือนถูกสร้างจาก mock data — ยังไม่มีระบบ realtime หรือ push notification
-      </InfoBanner>
 
       <Tabs
         value={tab}
@@ -116,7 +106,7 @@ export default function Notifications() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Bell}
-          title={tab === 'unread' ? 'อ่านครบทุกแล้ว' : 'ยังไม่มีการแจ้งเตือน'}
+          title={tab === 'unread' ? 'อ่านครบแล้ว' : 'ยังไม่มีการแจ้งเตือน'}
           description={
             tab === 'unread'
               ? 'ไม่มีการแจ้งเตือนที่ยังไม่ได้อ่านในขณะนี้'
@@ -146,7 +136,7 @@ export default function Notifications() {
                 >
                   <Link
                     to={notification.link || '/notifications'}
-                    onClick={() => markRead(notification)}
+                    onClick={() => openNotification(notification)}
                     className="flex items-start gap-3.5 px-5 py-4"
                   >
                     <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', tone)}>

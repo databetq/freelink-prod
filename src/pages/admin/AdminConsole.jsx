@@ -1,7 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { Briefcase, CheckCircle2, Flag, ShieldAlert, Users } from 'lucide-react'
-import { useToast } from '@/contexts/ToastContext'
+import { Briefcase, Flag, ShieldAlert, Users } from 'lucide-react'
 import { useAsync } from '@/hooks/useAsync'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { adminService } from '@/services/api/adminService'
@@ -14,8 +13,9 @@ import { Avatar } from '@/components/common/Avatar'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
 import { TableSkeleton } from '@/components/common/LoadingSkeleton'
-import { InfoBanner } from '@/components/common/InfoBanner'
+import { AccountModerationDialog } from './AccountModerationDialog'
 import { jobStatus } from '@/constants'
+import { supportStatuses, supportTopics } from '@/constants/support'
 import { formatCurrency, formatDate } from '@/utils/format'
 
 const sections = ['users', 'jobs', 'reports']
@@ -23,12 +23,12 @@ const sections = ['users', 'jobs', 'reports']
 export default function AdminConsole() {
   const { section = 'users' } = useParams()
   const navigate = useNavigate()
-  const toast = useToast()
   const tab = sections.includes(section) ? section : 'users'
   useDocumentTitle('Admin console')
 
-  const { data, loading, error, refresh } = useAsync(() => adminService.getOverview(), [])
-  const [busyId, setBusyId] = useState(null)
+  const { data, loading, error, refresh, setData } = useAsync(() => adminService.getOverview(), [])
+  const [selectedUserId, setSelectedUserId] = useState(null)
+  const closeModeration = useCallback(() => setSelectedUserId(null), [])
 
   if (!sections.includes(section)) {
     return <Navigate to="/admin/users" replace />
@@ -37,55 +37,33 @@ export default function AdminConsole() {
   const users = data?.users || []
   const jobs = data?.jobs || []
   const reports = data?.reports || []
+  const selectedUser = users.find((user) => user.id === selectedUserId)
 
-  const toggleUser = async (user) => {
-    setBusyId(user.id)
-    const nextStatus = user.status === 'active' ? 'suspended' : 'active'
-    try {
-      await adminService.updateUserStatus(user.id, nextStatus)
-      toast.success(
-        nextStatus === 'active' ? 'คืนสถานะบัญชีแล้ว' : 'ระงับบัญชีแล้ว',
-        'การเปลี่ยนแปลงมีผลเฉพาะ mock data',
-      )
-      refresh()
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  const resolveReport = async (report) => {
-    setBusyId(report.id)
-    try {
-      await adminService.resolveReport(report.id, 'resolved')
-      toast.success('ปิดรายงานแล้ว', 'สถานะถูกอัปเดตใน mock data')
-      refresh()
-    } finally {
-      setBusyId(null)
-    }
+  const updateUser = (updated) => {
+    setData((current) => ({
+      ...current,
+      users: current.users.map((item) => item.id === updated.id ? updated : item),
+    }))
   }
 
   return (
     <div>
       <PageHeader
-        eyebrow="Admin demo"
+        eyebrow="Admin"
         title="Admin console"
-        description="หน้าจอตัวอย่างสำหรับจัดการผู้ใช้ ประกาศงาน และรายงานปัญหา — ไม่มี Backend สำหรับ Admin"
+        description="ดูบัญชีผู้ใช้และประกาศงาน พร้อมจัดการสถานะบัญชี"
         actions={
-          <Button to="/settings" variant="secondary" size="md">
-            กลับไปตั้งค่า
+          <Button to="/" variant="secondary" size="md">
+            ไปหน้าแรก
           </Button>
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="Demo only">
-        Admin console นี้เป็นส่วนเสริมเพื่อสาธิต UI การจัดการ — การกระทำทั้งหมดเกิดกับ mock data
-        ในเบราว์เซอร์ของคุณเท่านั้น และไม่มีระบบสิทธิ์ในระดับ production
-      </InfoBanner>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="ผู้ใช้ทั้งหมด" value={loading ? '—' : users.length} icon={Users} tone="brand" />
-        <StatCard label="ประกาศงาน" value={loading ? '—' : jobs.length} icon={Briefcase} tone="blue" />
-        <StatCard label="รายงานที่เปิดอยู่" value={loading ? '—' : reports.filter((r) => r.status !== 'resolved').length} icon={Flag} tone="amber" />
+        <StatCard label="ผู้ใช้ทั้งหมด" value={data ? users.length : '—'} icon={Users} tone="brand" />
+        <StatCard label="ประกาศงาน" value={data ? jobs.length : '—'} icon={Briefcase} tone="blue" />
+        <StatCard label="รายงานที่เปิดอยู่" value={data ? reports.filter((r) => r.status !== 'resolved').length : '—'} icon={Flag} tone="amber" />
       </div>
 
       <Tabs
@@ -93,9 +71,9 @@ export default function AdminConsole() {
         onChange={(next) => navigate(`/admin/${next}`)}
         className="my-5"
         items={[
-          { value: 'users', label: 'ผู้ใช้', count: users.length },
-          { value: 'jobs', label: 'ประกาศงาน', count: jobs.length },
-          { value: 'reports', label: 'รายงานปัญหา', count: reports.length },
+          { value: 'users', label: 'ผู้ใช้', count: data ? users.length : undefined },
+          { value: 'jobs', label: 'ประกาศงาน', count: data ? jobs.length : undefined },
+          { value: 'reports', label: 'รายงานปัญหา', count: reports?.length },
         ]}
       />
 
@@ -143,14 +121,13 @@ export default function AdminConsole() {
                   </span>
                   <span className="text-[10.5px] text-ink-400">{formatDate(user.joined)}</span>
                   <div className="flex items-center gap-1.5 md:justify-end">
-                    {user.role === 'client' ? (
+                    {user.role !== 'admin' ? (
                       <Button
-                        variant={user.status === 'active' ? 'danger-ghost' : 'subtle'}
+                        variant="subtle"
                         size="sm"
-                        loading={busyId === user.id}
-                        onClick={() => toggleUser(user)}
+                        onClick={() => setSelectedUserId(user.id)}
                       >
-                        {user.status === 'active' ? 'ระงับ' : 'คืนสถานะ'}
+                        จัดการ
                       </Button>
                     ) : (
                       <span className="text-[10px] text-ink-400">—</span>
@@ -161,6 +138,8 @@ export default function AdminConsole() {
             </ul>
           </div>
         )
+      ) : tab === 'jobs' && jobs.length === 0 ? (
+        <EmptyState icon={Briefcase} title="ยังไม่มีประกาศงาน" />
       ) : tab === 'jobs' ? (
         <div className="card overflow-hidden">
           <div className="hidden grid-cols-[2.2fr_1.1fr_0.8fr_1fr_0.9fr] gap-3 border-b border-ink/[0.06] bg-paper-soft px-5 py-3 text-[10px] font-semibold uppercase tracking-wide text-ink-400 md:grid">
@@ -190,12 +169,12 @@ export default function AdminConsole() {
                     {formatCurrency(job.budgetMin, { compact: true })}–{formatCurrency(job.budgetMax, { compact: true })}
                   </span>
                   <div className="text-right">
-                    <Link
+                    {job.status !== 'draft' && <Link
                       to={`/jobs/${job.id}`}
                       className="text-[11px] font-semibold text-brand-700 hover:underline"
                     >
                       เปิดประกาศ →
-                    </Link>
+                    </Link>}
                   </div>
                 </li>
               )
@@ -214,35 +193,28 @@ export default function AdminConsole() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-[12.5px] font-bold text-ink">{report.target}</p>
-                    <StatusBadge
-                      label={
-                        report.status === 'open' ? 'เปิดอยู่' : report.status === 'reviewing' ? 'กำลังตรวจ' : 'ปิดแล้ว'
-                      }
-                      tone={report.status === 'open' ? 'rose' : report.status === 'reviewing' ? 'amber' : 'emerald'}
-                    />
+                    <p className="text-[12.5px] font-bold text-ink">{supportTopics[report.topic]}{report.target && ` · ${report.target}`}</p>
+                    <StatusBadge {...supportStatuses[report.status]} />
                   </div>
-                  <p className="mt-1 text-[11px] text-ink-500">
-                    {report.reason} · โดย {report.reporter} · {formatDate(report.createdAt)}
+                  <p className="mt-1 whitespace-pre-wrap break-words text-[12px] text-ink-600">{report.reason}</p>
+                  <p className="mt-1 break-words text-[11px] text-ink-500">
+                    โดย {report.reporter} ({report.contact}) · อัปเดต {formatDate(report.updatedAt)}
+                  </p>
+                  <p className="mt-1 break-all text-[10px] text-ink-500">
+                    เลขอ้างอิง {report.id}{report.projectId && ` · โครงการ ${report.projectId}`}
                   </p>
                 </div>
-                {report.status !== 'resolved' ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={CheckCircle2}
-                    loading={busyId === report.id}
-                    onClick={() => resolveReport(report)}
-                  >
-                    ปิดรายงาน
-                  </Button>
-                ) : (
-                  <span className="text-[10.5px] font-semibold text-emerald-600">จัดการแล้ว</span>
-                )}
+                <Button to={`/admin/reports/${report.id}`} variant="secondary" size="sm" className="shrink-0">
+                  เปิดรายงาน
+                </Button>
               </article>
             ))
           )}
         </div>
+      )}
+      {selectedUser && (
+        <AccountModerationDialog key={selectedUser.id}
+          user={selectedUser} onClose={closeModeration} onUserUpdated={updateUser} />
       )}
     </div>
   )

@@ -56,8 +56,7 @@ export function Footer() {
               ))}
             </div>
             <p className="mt-6 max-w-sm rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3 text-[11px] leading-relaxed text-white/40">
-              Frontend demo — ข้อมูลทั้งหมดเป็นข้อมูลจำลอง และยังไม่ได้เชื่อมต่อ Backend
-              หรือ Smart Contract จริง
+              แพลตฟอร์มสำหรับลงงาน ส่งข้อเสนอ และจัดการโครงการ
             </p>
           </div>
 
@@ -96,9 +95,6 @@ export function Footer() {
             <Link to="/help" className="transition hover:text-white/70">
               ติดต่อทีม
             </Link>
-            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-emerald-300">
-              Mock data mode
-            </span>
           </div>
         </div>
       </div>

@@ -84,11 +84,8 @@ export default function Messages() {
         <PageHeader
           eyebrow="Messages"
           title="ข้อความ"
-          description="พูดคุยรายละเอียดงานกับลูกค้าหรือฟรีแลนซ์ — ข้อความเป็นข้อมูลจำลอง"
+          description="พูดคุยรายละเอียดงานกับลูกค้าหรือฟรีแลนซ์"
         />
-        <InfoBanner tone="warning" className="mb-5" title="Mock messaging">
-          ข้อความถูกเก็บใน mock database ยังไม่มีการส่งแบบ realtime หรือแจ้งเตือนภายนอก
-        </InfoBanner>
       </div>
 
       {threads.length === 0 ? (

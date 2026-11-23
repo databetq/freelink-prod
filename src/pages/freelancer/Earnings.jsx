@@ -1,23 +1,26 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowDownToLine, TrendingUp, Wallet } from 'lucide-react'
+import { formatEther } from 'ethers'
 import { useAuth } from '@/contexts/AuthContext'
-import { useToast } from '@/contexts/ToastContext'
+import { useWallet } from '@/contexts/WalletContext'
 import { useAsync } from '@/hooks/useAsync'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { transactionService } from '@/services/api/transactionService'
 import { projectService } from '@/services/api/projectService'
+import { readPendingWithdrawal, withdraw } from '@/services/blockchain/contractService'
+import { executeTransaction } from '@/services/blockchain/transactionService'
 import { PageHeader } from '@/components/common/PageHeader'
 import { StatCard } from '@/components/common/StatCard'
 import { Button } from '@/components/common/Button'
 import { Modal } from '@/components/common/Modal'
-import { Input } from '@/components/common/FormField'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
 import { TableSkeleton } from '@/components/common/LoadingSkeleton'
 import { WalletConnectButton } from '@/components/wallet/WalletConnectButton'
+import { TransactionStatus } from '@/components/wallet/TransactionStatus'
 import { transactionStatus, transactionTypes } from '@/constants'
 import { formatCurrency, formatDate } from '@/utils/format'
 import { cn } from '@/utils/cn'
@@ -25,7 +28,7 @@ import { cn } from '@/utils/cn'
 export default function Earnings() {
   useDocumentTitle('รายได้')
   const { user, profileId } = useAuth()
-  const toast = useToast()
+  const wallet = useWallet()
   const { data, loading, error, refresh } = useAsync(
     () => transactionService.list(user?.id),
     [user?.id],
@@ -36,39 +39,20 @@ export default function Earnings() {
   )
 
   const [withdrawOpen, setWithdrawOpen] = useState(false)
-  const [amount, setAmount] = useState('')
-  const [amountError, setAmountError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [withdrawal, setWithdrawal] = useState(null)
+  const walletAddress = wallet.isConnected && !wallet.isWrongNetwork ? wallet.address : null
+  const { data: claim, loading: claimLoading, error: claimError, refresh: refreshClaim } = useAsync(async () => (
+    walletAddress ? { address: walletAddress, amount: await readPendingWithdrawal(walletAddress) } : null
+  ), [walletAddress])
+  const pendingAmount = claim && claim.address === walletAddress && !claimError ? claim.amount : null
+  const canWithdraw = pendingAmount > 0n && !claimLoading && !busy
 
   const transactions = data || []
-  const projectList = projects || []
-
-  const stats = useMemo(() => {
-    const earnings = transactions
-      .filter((tx) => tx.type === 'earning' && tx.status === 'confirmed')
-      .reduce((sum, tx) => sum + tx.amount, 0)
-    const fees = transactions
-      .filter((tx) => tx.type === 'fee')
-      .reduce((sum, tx) => sum + tx.amount, 0)
-    const withdrawals = transactions.filter((tx) => tx.type === 'withdrawal')
-    const withdrawn = withdrawals
-      .filter((tx) => tx.status === 'confirmed')
-      .reduce((sum, tx) => sum + tx.amount, 0)
-    const pendingWithdrawal = withdrawals
-      .filter((tx) => tx.status === 'pending')
-      .reduce((sum, tx) => sum + tx.amount, 0)
-    const inEscrow = projectList
-      .filter((project) => project.escrowStatus === 'funded')
-      .reduce((sum, project) => sum + (project.escrowAmount - project.releasedAmount), 0)
-    return {
-      earnings,
-      fees,
-      withdrawn,
-      pendingWithdrawal,
-      inEscrow,
-      available: Math.max(0, earnings - withdrawn - pendingWithdrawal),
-    }
-  }, [transactions, projectList])
+  const fundedProjects = (projects || []).filter((project) => project.escrowStatus === 'funded')
+  const inEscrow = fundedProjects.reduce((sum, project) => sum + project.escrowAmount, 0)
+  const earnings = transactions.filter((tx) => tx.type === 'earning' && tx.status === 'confirmed')
+  const totalEarnings = earnings.reduce((sum, tx) => sum + tx.amount, 0)
 
   const monthly = useMemo(() => {
     const formatter = new Intl.DateTimeFormat('th-TH', { month: 'short' })
@@ -93,27 +77,11 @@ export default function Earnings() {
   }, [transactions])
 
   const submitWithdrawal = async () => {
-    const value = Number(amount)
-    if (!value || value <= 0) {
-      setAmountError('กรุณากรอกจำนวนเงินมากกว่า 0')
-      return
-    }
-    if (value > stats.available) {
-      setAmountError(`ถอนได้สูงสุด ${formatCurrency(stats.available)}`)
-      return
-    }
+    if (!canWithdraw) return
     setBusy(true)
     try {
-      await transactionService.requestWithdrawal(user.id, value)
-      toast.success(
-        'บันทึกคำขอถอนแล้ว (Mock)',
-        'คำขอถูกเพิ่มใน mock ledger — ยังไม่มีการโอนเงินจริงและต้องรอระบบ Backend/Wallet',
-      )
-      setWithdrawOpen(false)
-      setAmount('')
-      refresh()
-    } catch (err) {
-      toast.error('ส่งคำขอไม่สำเร็จ', err.message)
+      await executeTransaction(() => withdraw(walletAddress), { onStatus: setWithdrawal })
+      await refreshClaim()
     } finally {
       setBusy(false)
     }
@@ -124,54 +92,49 @@ export default function Earnings() {
       <PageHeader
         eyebrow="Earnings"
         title="รายได้ของฉัน"
-        description="ยอดรายได้ที่ยืนยันแล้ว เงินใน escrow และประวัติการถอน"
+        description="รายได้ที่ยืนยันแล้วและยอดที่รอปล่อยจาก Escrow"
         actions={
           <Button
             variant="brand"
             size="md"
             icon={ArrowDownToLine}
             onClick={() => {
-              setAmount('')
-              setAmountError('')
               setWithdrawOpen(true)
+              refreshClaim()
             }}
           >
-            ขอถอนเงิน
+            ถอนยอดค้างจาก Escrow
           </Button>
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="ข้อมูลรายได้จำลอง">
-        ตัวเลขทั้งหมดในหน้านี้เป็น mock ledger — ไม่มีการโอนเงินจริง
-        การถอนจะถูกบันทึกเป็นคำขอตัวอย่างเท่านั้น
-      </InfoBanner>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="รายได้ทั้งหมด"
-          value={loading ? '—' : formatCurrency(stats.earnings)}
-          hint={`ค่าธรรมเนียม ${formatCurrency(stats.fees)}`}
+          value={loading || error ? '—' : formatCurrency(totalEarnings)}
+          hint="ยอดจากรายการจ่ายที่ยืนยันแล้ว"
           icon={TrendingUp}
           tone="emerald"
         />
         <StatCard
-          label="ถอนได้ตอนนี้"
-          value={loading ? '—' : formatCurrency(stats.available)}
-          hint="หลังหักคำขอที่รอดำเนินการ"
+          label="ยอดค้างที่เบิกได้"
+          value={claimLoading || pendingAmount === null ? '—' : `${formatEther(pendingAmount)} ETH`}
+          hint="ยอดค้างจ่ายของ Wallet ที่เชื่อมอยู่"
           icon={Wallet}
           tone="brand"
         />
         <StatCard
           label="รอปล่อยจาก Escrow"
-          value={formatCurrency(stats.inEscrow)}
-          hint="จะพร้อมเมื่อลูกค้าอนุมัติ"
+          value={projects ? formatCurrency(inEscrow) : '—'}
+          hint="รอธุรกรรมปล่อยเงินบนเครือข่าย"
           icon={Wallet}
           tone="blue"
         />
         <StatCard
-          label="รอถอน / ถอนแล้ว"
-          value={`${formatCurrency(stats.pendingWithdrawal, { compact: true })} / ${formatCurrency(stats.withdrawn, { compact: true })}`}
-          hint="สถานะจาก mock ledger"
+          label="รายการจ่ายที่ยืนยันแล้ว"
+          value={loading || error ? '—' : String(earnings.length)}
+          hint="นับจากประวัติรายได้"
           icon={ArrowDownToLine}
           tone="violet"
         />
@@ -181,9 +144,15 @@ export default function Earnings() {
         <section className="card p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold">รายได้ 6 เดือนล่าสุด</h2>
-            <span className="text-[10px] text-ink-400">mock data</span>
+
           </div>
-          <div className="mt-5 flex h-44 items-end gap-2 sm:gap-3">
+          {loading ? <p className="mt-4 text-sm text-ink-500">กำลังโหลดรายได้</p> : error ? (
+            <p className="mt-4 text-sm text-ink-500">โหลดข้อมูลรายได้ไม่สำเร็จ</p>
+          ) : monthly.buckets.every((bucket) => bucket.total === 0) ? (
+            <p className="mt-4 rounded-lg bg-paper p-4 text-sm text-ink-500">
+              ยังไม่มีธุรกรรมจ่ายค่าจ้างที่ยืนยันในช่วง 6 เดือนนี้
+            </p>
+          ) : <div className="mt-5 flex h-44 items-end gap-2 sm:gap-3">
             {monthly.buckets.map((bucket) => {
               const height = Math.round((bucket.total / monthly.max) * 100)
               return (
@@ -205,32 +174,23 @@ export default function Earnings() {
                 </div>
               )
             })}
-          </div>
+          </div>}
         </section>
 
         <section className="card p-5">
           <h2 className="text-sm font-bold">กระเป๋าเงิน</h2>
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-500">
-            เชื่อมต่อ Wallet เพื่อเตรียมรับเงินจริงเมื่อระบบ Smart Contract พร้อม
+            เมื่อผู้จ้างปล่อยเงิน สัญญาจะโอนค่าจ้างเข้า Wallet ฟรีแลนซ์ตามข้อตกลงโดยตรง
           </p>
           <WalletConnectButton size="md" className="mt-3" />
           <div className="mt-4 space-y-2 border-t border-ink/[0.06] pt-3 text-[11px]">
             <div className="flex items-center justify-between">
               <span className="text-ink-500">รายได้ยืนยันแล้ว</span>
-              <span className="font-semibold text-ink">{formatCurrency(stats.earnings)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-ink-500">รอถอน</span>
-              <span className="font-semibold text-amber-600">{formatCurrency(stats.pendingWithdrawal)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-ink-500">ถอนแล้ว</span>
-              <span className="font-semibold text-emerald-600">{formatCurrency(stats.withdrawn)}</span>
+              <span className="font-semibold text-ink">{loading || error ? '—' : formatCurrency(totalEarnings)}</span>
             </div>
           </div>
           <p className="mt-3 rounded-lg bg-paper px-3 py-2 text-[10px] leading-relaxed text-ink-400">
-            การถอนเงินจริงจะต้องมีการยืนยันจาก Wallet และ Smart Contract
-            — ขณะนี้คำขอถูกบันทึกเป็นข้อมูลจำลองเท่านั้น
+            หากโอนเข้า Wallet ไม่สำเร็จ สัญญาจะเก็บเป็นยอดค้างที่เบิกได้จากหน้านี้
           </p>
         </section>
       </div>
@@ -251,7 +211,7 @@ export default function Earnings() {
           <EmptyState
             icon={Wallet}
             title="ยังไม่มีรายการรายได้"
-            description="เมื่อคุณทำงานเสร็จและลูกค้าอนุมัติ รายได้จะแสดงที่นี่"
+            description="รายได้จะแสดงเมื่อระบบยืนยันธุรกรรมปล่อยค่าจ้างบนเครือข่ายแล้ว"
           />
         ) : (
           <div className="card overflow-hidden">
@@ -283,64 +243,50 @@ export default function Earnings() {
         )}
       </section>
 
+      {fundedProjects.length > 0 && (
+        <section className="card mt-5 p-5">
+          <h2 className="text-sm font-bold">โครงการที่มีเงินรอปล่อยจาก Escrow</h2>
+          <ul className="mt-2 divide-y divide-ink/[0.06]">
+            {fundedProjects.map((project) => (
+              <li key={project.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+                <Link to={`/freelancer/projects/${project.id}/escrow`} className="font-semibold text-brand-700 hover:underline">
+                  {project.title}
+                </Link>
+                <span>{formatCurrency(project.escrowAmount)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <Modal
         open={withdrawOpen}
-        onClose={() => setWithdrawOpen(false)}
-        title="ขอถอนเงิน"
-        description={`ยอดที่ถอนได้: ${formatCurrency(stats.available)} (mock)`}
+        onClose={() => { if (!busy) setWithdrawOpen(false) }}
+        title="ถอนยอดค้างจาก Escrow"
+        description="สัญญาจะโอนยอดค้างทั้งหมดให้ Wallet ที่เชื่อมอยู่เมื่อคุณยืนยันธุรกรรม"
         footer={
           <>
             <Button variant="secondary" onClick={() => setWithdrawOpen(false)} disabled={busy}>
-              ยกเลิก
+              ปิด
             </Button>
-            <Button variant="brand" onClick={submitWithdrawal} loading={busy}>
-              ส่งคำขอถอน
+            <Button variant="brand" onClick={submitWithdrawal} loading={busy} disabled={!canWithdraw}>
+              ถอนทั้งหมด
             </Button>
           </>
         }
       >
-        <Input
-          label="จำนวนเงิน (บาท)"
-          type="number"
-          min="1"
-          max={stats.available}
-          value={amount}
-          onChange={(event) => {
-            setAmount(event.target.value)
-            setAmountError('')
-          }}
-          error={amountError}
-          placeholder="15000"
-          required
-        />
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {[1000, 5000, 10000].map((quick) => (
-            <button
-              key={quick}
-              type="button"
-              onClick={() => setAmount(String(quick))}
-              className="rounded-lg border border-ink/10 bg-white px-2.5 py-1 text-[11px] font-semibold text-ink-600 transition hover:border-brand-300"
-            >
-              ฿{quick.toLocaleString('th-TH')}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setAmount(String(stats.available))}
-            className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700 transition hover:bg-brand-100"
-          >
-            ทั้งหมด
-          </button>
-        </div>
-
-        <InfoBanner tone="warning" className="mt-4" title="ยังไม่ใช่การถอนจริง">
-          คำขอนี้จะถูกบันทึกใน mock ledger เพื่อทดสอบ UI การโอนเงินจริงจะต้องเชื่อมต่อระบบ Backend
-          และ/หรือ Smart Contract ตามที่ทีมกำหนด
-        </InfoBanner>
-
-        <div className="mt-3">
-          <p className="mb-1.5 text-[11px] font-medium text-ink-500">Wallet สำหรับรับเงิน</p>
+        <div className="space-y-3">
           <WalletConnectButton size="sm" />
+          {!walletAddress ? <InfoBanner>เชื่อม Wallet และเลือกเครือข่าย Escrow เพื่อดูยอด</InfoBanner>
+            : claimLoading ? <InfoBanner>กำลังตรวจยอดจาก Smart Contract</InfoBanner>
+            : claimError ? (
+              <InfoBanner tone="warning">
+                อ่านยอดค้างจาก Smart Contract ไม่สำเร็จ
+                <Button onClick={refreshClaim} variant="ghost" size="sm">ลองอีกครั้ง</Button>
+              </InfoBanner>
+            ) : pendingAmount === 0n ? <InfoBanner>Wallet นี้ไม่มียอดค้างจ่ายจาก Escrow</InfoBanner>
+            : pendingAmount !== null && <InfoBanner>ยอดที่เบิกได้ {formatEther(pendingAmount)} ETH</InfoBanner>}
+          {withdrawal && <TransactionStatus {...withdrawal} />}
         </div>
       </Modal>
     </div>

@@ -11,6 +11,7 @@ import { projectService } from '@/services/api/projectService'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Tabs } from '@/components/common/Tabs'
 import { ProposalCard } from '@/components/proposals/ProposalCard'
+import { ShortlistButton } from '@/components/proposals/ShortlistButton'
 import { Button } from '@/components/common/Button'
 import { Select } from '@/components/common/FormField'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
@@ -40,7 +41,6 @@ export default function JobApplicants() {
   const [sort, setSort] = useState('recent')
   const [confirm, setConfirm] = useState(null)
   const [hiring, setHiring] = useState(false)
-  const [shortlistingId, setShortlistingId] = useState(null)
 
   const job = jobQuery.data
   const proposals = proposalQuery.data || []
@@ -68,19 +68,6 @@ export default function JobApplicants() {
     })
   }, [proposals, tab, sort])
 
-  const shortlist = async (proposal) => {
-    setShortlistingId(proposal.id)
-    try {
-      await proposalService.updateStatus(proposal.id, 'shortlisted')
-      toast.success('คัดเลือกข้อเสนอแล้ว', `${proposal.freelancer?.name} — สถานะถูกอัปเดตใน mock data`)
-      await proposalQuery.refresh()
-    } catch (error) {
-      toast.error('อัปเดตไม่สำเร็จ', error.message)
-    } finally {
-      setShortlistingId(null)
-    }
-  }
-
   const hire = async () => {
     if (!confirm) return
     setHiring(true)
@@ -88,7 +75,7 @@ export default function JobApplicants() {
       const result = await proposalService.hire(confirm.id)
       toast.success(
         'จ้างฟรีแลนซ์แล้ว',
-        'สร้างโครงการในสถานะ “ยังไม่ฝากเงิน escrow” — การชำระเงินจริงต้องรอ Smart Contract',
+        'สร้างโครงการแล้ว ไปที่ข้อตกลงและการจ่ายเงินเพื่อเตรียมฝากเข้า Escrow',
       )
       setConfirm(null)
       navigate(`/client/projects/${result.project.id}`)
@@ -161,7 +148,7 @@ export default function JobApplicants() {
           งบประมาณ {formatCurrency(job.budgetMin, { compact: true })}–{formatCurrency(job.budgetMax, { compact: true })}
         </span>
         <span className="text-ink-300">•</span>
-        <span>ระยะเวลา {job.duration}</span>
+        <span>ระยะเวลาที่ระบุในประกาศ {job.duration}</span>
         {project && (
           <>
             <span className="text-ink-300">•</span>
@@ -172,9 +159,12 @@ export default function JobApplicants() {
         )}
       </div>
 
-      <InfoBanner tone="info" className="mb-5" title="การจ้างงานในโหมดจำลอง">
-        เมื่อจ้าง ระบบจะสร้างโครงการและตั้งสถานะ escrow เป็น “ยังไม่ฝากเงิน”
-        — เงินจะไม่ถูกโอนจริง การฝากเงินจริงอยู่ในหน้าจอ Escrow และต้องเชื่อมต่อ Smart Contract ก่อน
+      <InfoBanner tone="info" className="mb-5" title={project ? 'ไปที่ข้อตกลงและการจ่ายเงิน' : 'หลังเลือกข้อเสนอ'}>
+        {project ? (
+          <Link to={`/client/projects/${project.id}/escrow`} className="font-semibold text-brand-700 underline">
+            เปิดหน้า Escrow เพื่อดูสถานะและจัดการการฝากบน Sepolia
+          </Link>
+        ) : 'เมื่อจ้าง ระบบจะสร้างโครงการจากข้อเสนอที่เลือก จากนั้นคุณตรวจข้อตกลงและเซ็นฝากผ่าน MetaMask ในหน้า Escrow ได้'}
       </InfoBanner>
 
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -242,15 +232,8 @@ export default function JobApplicants() {
                     <Button to={`/freelancers/${proposal.freelancerId}`} variant="secondary" size="sm">
                       ดูโปรไฟล์
                     </Button>
-                    {proposal.status === 'pending' && (
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        loading={shortlistingId === proposal.id}
-                        onClick={() => shortlist(proposal)}
-                      >
-                        คัดเลือก
-                      </Button>
+                    {job.status === 'open' && canHire && (
+                      <ShortlistButton proposal={proposal} setProposals={proposalQuery.setData} />
                     )}
                     {canHire && (
                       <Button
@@ -278,7 +261,7 @@ export default function JobApplicants() {
       <div className="mt-6 flex items-center justify-center gap-2">
         <ArrowUpDown className="h-3.5 w-3.5 text-ink-400" />
         <p className="text-[11px] text-ink-400">
-          ข้อมูลผู้สมัคร ข้อเสนอ และการจ้างทั้งหมดเป็นข้อมูลจำลอง
+          การจ้างจะสร้างโปรเจกต์สำหรับข้อเสนอที่เลือก
         </p>
       </div>
 
@@ -290,7 +273,7 @@ export default function JobApplicants() {
         title="ยืนยันการจ้างฟรีแลนซ์?"
         description={
           confirm
-            ? `จ้าง ${confirm.freelancer?.name} ในราคา ${formatCurrency(confirm.bidAmount)} ระยะเวลา ${confirm.deliveryDays} วัน — ระบบจะสร้างโครงการและปิดรับข้อเสนออื่นใน mock data`
+            ? `จ้าง ${confirm.freelancer?.name} ในราคา ${formatCurrency(confirm.bidAmount)} ระยะเวลา ${confirm.deliveryDays} วัน — ระบบจะสร้างโครงการและปิดรับข้อเสนออื่น`
             : ''
         }
         confirmLabel="ยืนยันการจ้าง"

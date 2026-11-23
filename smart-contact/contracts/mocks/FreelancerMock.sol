@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 interface IFreelinkEscrow {
-    function acceptEscrow(bytes32 escrowId, bytes32 termsHash) external;
+    function acceptEscrow(bytes32 escrowId, bytes32 termsHash, uint256 expectedAmount, uint64 expectedDeadline) external;
     function submitWork(bytes32 escrowId, bytes32 workHash) external;
     function withdraw() external;
 }
@@ -21,7 +21,9 @@ contract FreelancerMock {
     function setAcceptEth(bool v) external { acceptEth = v; }
     function setAttack(bool v) external { attack = v; }
 
-    function accept(bytes32 escrowId, bytes32 termsHash) external { escrow.acceptEscrow(escrowId, termsHash); }
+    function accept(bytes32 escrowId, bytes32 termsHash, uint256 amount, uint64 deadline) external {
+        escrow.acceptEscrow(escrowId, termsHash, amount, deadline);
+    }
     function submit(bytes32 escrowId, bytes32 workHash) external { escrow.submitWork(escrowId, workHash); }
     function pull() external { escrow.withdraw(); }
 

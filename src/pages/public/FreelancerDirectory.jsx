@@ -16,20 +16,9 @@ import { useAsync } from '@/hooks/useAsync'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { profileService } from '@/services/api/profileService'
-import { availabilityOptions } from '@/constants'
+import { availabilityOptions, popularSkills } from '@/constants'
 
 const PAGE_SIZE = 6
-
-const popularSkills = [
-  'Product Design',
-  'Figma',
-  'React',
-  'Design System',
-  'Motion Design',
-  'Copywriting',
-  'SQL',
-  'Brand Identity',
-]
 
 export default function FreelancerDirectory() {
   useDocumentTitle('ค้นหาฟรีแลนซ์')
@@ -139,7 +128,7 @@ export default function FreelancerDirectory() {
           <EmptyState
             icon={SearchX}
             title="ไม่พบฟรีแลนซ์ที่ตรงกับเงื่อนไข"
-            description="ลองเลือกทักษะอื่น หรือล้างตัวกรองเพื่อดูโปรไฟล์ทั้งหมดในข้อมูลตัวอย่าง"
+            description="ลองเลือกทักษะอื่น หรือล้างตัวกรองเพื่อดูโปรไฟล์ทั้งหมด"
             action={
               <Button variant="secondary" onClick={reset}>
                 ล้างตัวกรอง

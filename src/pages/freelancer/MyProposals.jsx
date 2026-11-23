@@ -47,7 +47,7 @@ export default function MyProposals() {
     setBusy(true)
     try {
       await proposalService.withdraw(confirm.id)
-      toast.success('ถอนข้อเสนอแล้ว', 'สถานะถูกอัปเดตใน mock data — ลูกค้าจะไม่เห็นข้อเสนอนี้')
+      toast.success('ถอนข้อเสนอแล้ว', 'ข้อเสนอนี้ถูกถอนจากการพิจารณา')
       setConfirm(null)
       await refresh()
     } catch (err) {
@@ -70,9 +70,6 @@ export default function MyProposals() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="Mock proposals">
-        ข้อเสนอทั้งหมดถูกเก็บใน mock database ของเบราว์เซอร์ — การถอนหรือเปลี่ยนสถานะไม่มีผลกับระบบจริง
-      </InfoBanner>
 
       <Tabs
         value={tab}
@@ -158,7 +155,7 @@ export default function MyProposals() {
         title="ถอนข้อเสนอนี้?"
         description={
           confirm
-            ? `ข้อเสนอสำหรับ “${confirm.job?.title}” ราคา ${confirm.bidAmount?.toLocaleString('th-TH')} บาท จะถูกถอนและลูกค้าจะไม่เห็นอีก — ไม่สามารถกู้คืนได้ใน mock data`
+            ? `ข้อเสนอสำหรับ “${confirm.job?.title}” ราคา ${confirm.bidAmount?.toLocaleString('th-TH')} บาท จะถูกถอนจากการพิจารณา`
             : ''
         }
         confirmLabel="ถอนข้อเสนอ"

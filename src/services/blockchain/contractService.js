@@ -25,10 +25,6 @@ export const CHAIN_STATUS = [
   'resolved',
 ]
 
-const SECONDS_PER_DAY = 86400
-const MIN_DEADLINE_SECONDS = 7 * SECONDS_PER_DAY // freelancer should have at least a week after a deposit
-const MAX_DEADLINE_SECONDS = 364 * SECONDS_PER_DAY // contract rejects > 365 days
-
 function requireConfigured() {
   if (!isContractConfigured()) {
     throw new ContractNotConfiguredError(getMissingContractConfig())
@@ -79,15 +75,19 @@ async function getReadContract() {
   return new Contract(contractConfig.contractAddress, contractConfig.abi, provider)
 }
 
-async function getSignerContract() {
+async function getSignerContract(address) {
   requireConfigured()
   const provider = await getProvider()
   await requireRightChain(provider)
-  const signer = await provider.getSigner()
+  const signer = await provider.getSigner(address)
   return new Contract(contractConfig.contractAddress, contractConfig.abi, signer)
 }
 
 // ---------- Pure helpers (no wallet needed) ----------
+
+export function hashTerms(termsJson) {
+  return keccak256(toUtf8Bytes(termsJson))
+}
 
 /** projectId (bytes32) = keccak256(utf8(project.id)) */
 export function toProjectKey(projectId) {
@@ -104,47 +104,6 @@ export function getEscrowId({ clientAddress, projectId }) {
     [getAddress(clientAddress), toProjectKey(projectId)],
   )
   return keccak256(encoded)
-}
-
-/**
- * THB -> wei with integer maths only (floats would drift). 2 decimals of THB and
- * of the rate are kept; the result is rounded down.
- */
-export function thbToWei(thb, thbPerEth) {
-  const thbSatang = BigInt(Math.round(Number(thb) * 100))
-  const rateSatang = BigInt(Math.round(Number(thbPerEth) * 100))
-  if (thbSatang <= 0n || rateSatang <= 0n) {
-    throw new WalletError('ยอดเงินหรืออัตราแลกเปลี่ยนไม่ถูกต้อง', 'INVALID_AMOUNT')
-  }
-  return (thbSatang * 10n ** 18n) / rateSatang
-}
-
-/**
- * Interim terms hash: a stable JSON of the agreed scope, hashed. The freelancer must
- * submit the SAME hash to accept. TODO(team): the backend should own this value
- * (section 4.4 of the guide) — keep the field order stable if this changes.
- */
-export function buildTermsHash(project) {
-  const terms = {
-    v: 1,
-    projectId: String(project.id),
-    jobId: project.jobId ?? null,
-    title: project.title,
-    budget: Number(project.budget),
-  }
-  return keccak256(toUtf8Bytes(JSON.stringify(terms)))
-}
-
-/**
- * Interim deadline (unix seconds): the project's dueDate, but at least a week from
- * now and never beyond what the contract accepts. TODO(team): confirm the rule.
- */
-export function buildDeadline(project, now = Date.now()) {
-  const nowSeconds = Math.floor(now / 1000)
-  const due = project.dueDate ? Math.floor(new Date(project.dueDate).getTime() / 1000) : 0
-  const earliest = nowSeconds + MIN_DEADLINE_SECONDS
-  const latest = nowSeconds + MAX_DEADLINE_SECONDS
-  return BigInt(Math.min(Math.max(due || 0, earliest), latest))
 }
 
 // ---------- Reads ----------
@@ -210,22 +169,29 @@ export async function readEscrow({ escrowId }) {
 
 // ---------- Writes (each returns the ethers tx; wrap with executeTransaction) ----------
 
-export async function depositEscrow({ projectId, freelancerAddress, deadline, termsHash, amountWei }) {
+export async function depositEscrow({ projectKey, clientAddress, freelancerAddress, deadline, termsHash, amountWei, expectedTotal }) {
   const method = requireMethod('depositEscrow')
   if (!isAddress(freelancerAddress)) {
     throw new WalletError('address ของ freelancer ไม่ถูกต้อง', 'INVALID_ADDRESS')
   }
-  const contract = await getSignerContract()
+  const contract = await getSignerContract(clientAddress)
   const [, total] = await contract[requireMethod('quote')](amountWei)
-  return contract[method](toProjectKey(projectId), getAddress(freelancerAddress), deadline, termsHash, amountWei, {
+  if (total !== expectedTotal) {
+    throw new WalletError('ค่าธรรมเนียมเปลี่ยน กรุณาโหลดราคาล่าสุดก่อนเซ็น', 'QUOTE_CHANGED')
+  }
+  return contract[method](projectKey, getAddress(freelancerAddress), deadline, termsHash, amountWei, {
     value: total,
   })
 }
 
-/** freelancer: must pass the same termsHash the client bound at deposit. */
-export async function acceptEscrow({ escrowId, termsHash }) {
-  const contract = await getSignerContract()
-  return contract[requireMethod('acceptEscrow')](escrowId, termsHash)
+/**
+ * freelancer: must pass the same termsHash the client bound at deposit, plus the
+ * wage (wei) and deadline (unix seconds) from the agreed terms. Take these from the
+ * terms in the DB, not from `getEscrow`, otherwise the contract check is pointless.
+ */
+export async function acceptEscrow({ escrowId, freelancerAddress, termsHash, expectedAmountWei, expectedDeadline }) {
+  const contract = await getSignerContract(freelancerAddress)
+  return contract[requireMethod('acceptEscrow')](escrowId, termsHash, expectedAmountWei, expectedDeadline)
 }
 
 /** freelancer: workHash = keccak256 of the off-chain link/file. */
@@ -235,8 +201,8 @@ export async function submitWork({ escrowId, workHash }) {
 }
 
 /** client approves and pays the freelancer. */
-export async function releasePayment({ escrowId }) {
-  const contract = await getSignerContract()
+export async function releasePayment({ escrowId, clientAddress }) {
+  const contract = await getSignerContract(clientAddress)
   return contract[requireMethod('releasePayment')](escrowId)
 }
 
@@ -269,9 +235,17 @@ export async function settleExpiredDispute({ escrowId }) {
 }
 
 /** pull-payment fallback for payouts that could not be sent at settlement. */
-export async function withdraw() {
-  const contract = await getSignerContract()
+export async function withdraw(address) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('withdraw')]()
+}
+
+export async function readPendingWithdrawal(address) {
+  requireConfigured()
+  const provider = await getProvider()
+  await requireRightChain(provider)
+  const contract = new Contract(contractConfig.contractAddress, contractConfig.abi, provider)
+  return contract.pendingWithdrawals(address)
 }
 
 export { isContractConfigured, getMissingContractConfig }

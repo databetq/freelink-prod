@@ -18,6 +18,7 @@ import { ErrorState } from '@/components/common/ErrorState'
 import { Skeleton } from '@/components/common/LoadingSkeleton'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { StatusBadge } from '@/components/common/StatusBadge'
+import { ShortlistButton } from '@/components/proposals/ShortlistButton'
 import { proposalStatus } from '@/constants'
 import { formatCurrency } from '@/utils/format'
 import { cn } from '@/utils/cn'
@@ -89,7 +90,7 @@ export default function CompareProposals() {
     setHiring(true)
     try {
       const result = await proposalService.hire(confirm.id)
-      toast.success('จ้างฟรีแลนซ์แล้ว', 'โครงการถูกสร้างด้วยสถานะ escrow ยังไม่ฝากเงิน (ข้อมูลจำลอง)')
+      toast.success('จ้างฟรีแลนซ์แล้ว', 'สร้างโปรเจกต์แล้ว สถานะ Escrow รอฝากเงิน')
       setConfirm(null)
       navigate(`/client/projects/${result.project.id}`)
     } catch (error) {
@@ -308,18 +309,8 @@ export default function CompareProposals() {
                           <Button to={`/freelancers/${proposal.freelancerId}`} variant="secondary" size="sm">
                             ดูโปรไฟล์
                           </Button>
-                          {proposal.status === 'pending' && (
-                            <Button
-                              variant="subtle"
-                              size="sm"
-                              onClick={async () => {
-                                await proposalService.updateStatus(proposal.id, 'shortlisted')
-                                toast.success('คัดเลือกข้อเสนอแล้ว')
-                                proposalQuery.refresh()
-                              }}
-                            >
-                              คัดเลือก
-                            </Button>
+                          {job.status === 'open' && canHire && (
+                            <ShortlistButton proposal={proposal} setProposals={proposalQuery.setData} />
                           )}
                           {canHire && (
                             <Button variant="brand" size="sm" onClick={() => setConfirm(proposal)}>
@@ -367,7 +358,7 @@ export default function CompareProposals() {
         title="ยืนยันการจ้างจากตารางเปรียบเทียบ?"
         description={
           confirm
-            ? `จ้าง ${confirm.freelancer?.name} ที่ราคา ${formatCurrency(confirm.bidAmount)} — ข้อเสนออื่นจะถูกปฏิเสธใน mock data และสร้างโครงการใหม่`
+            ? `จ้าง ${confirm.freelancer?.name} ที่ราคา ${formatCurrency(confirm.bidAmount)} — ข้อเสนออื่นจะถูกปฏิเสธ และสร้างโครงการใหม่`
             : ''
         }
         confirmLabel="ยืนยันการจ้าง"

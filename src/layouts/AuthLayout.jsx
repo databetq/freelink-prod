@@ -1,5 +1,5 @@
 import { Link, Outlet } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, ShieldCheck, Sparkles, Wallet } from 'lucide-react'
+import { ArrowLeft, ShieldCheck, Sparkles, Wallet } from 'lucide-react'
 import { Logo } from '@/components/layout/Logo'
 
 const highlights = [
@@ -29,11 +29,11 @@ export function AuthLayout() {
             </div>
           </div>
           <p className="text-center text-[11px] text-ink-400">
-            การเข้าใช้งานถือว่ายอมรับข้อกำหนดและนโยบายความเป็นส่วนตัว (ข้อมูลจำลอง)
+            Freelink
           </p>
         </div>
 
-        <div className="relative hidden overflow-hidden bg-ink lg:flex lg:flex-col lg:justify-between lg:p-12">
+        <div className="relative hidden overflow-hidden bg-ink lg:flex lg:flex-col lg:justify-center lg:gap-8 lg:p-12">
           <div className="surface-grid-dark absolute inset-0" aria-hidden="true" />
           <div className="absolute -right-24 top-10 h-80 w-80 rounded-full bg-brand-600/30 blur-[100px]" aria-hidden="true" />
           <div className="absolute -bottom-24 left-0 h-80 w-80 rounded-full bg-violet-600/25 blur-[100px]" aria-hidden="true" />
@@ -79,26 +79,6 @@ export function AuthLayout() {
             </div>
           </div>
 
-          <div className="relative flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
-            <div className="flex -space-x-2">
-              {['from-indigo-400 to-violet-500', 'from-sky-400 to-blue-500', 'from-rose-400 to-orange-400'].map(
-                (color, index) => (
-                  <span
-                    key={index}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-gradient-to-br ${color} text-[9px] font-bold text-white`}
-                  >
-                    {['NC', 'PA', 'MT'][index]}
-                  </span>
-                ),
-              )}
-            </div>
-            <div className="text-[11px] leading-relaxed text-white/50">
-              <span className="font-semibold text-white">12,400+ ฟรีแลนซ์</span> พร้อมรับงานของคุณ
-              <span className="ml-1 inline-flex items-center gap-0.5 text-emerald-300">
-                <CheckCircle2 className="h-3 w-3" /> verified
-              </span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

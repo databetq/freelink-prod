@@ -1,11 +1,3 @@
-/**
- * DRAFT endpoint map.
- *
- * ⚠️ NONE of these paths are confirmed by the backend team yet. They are
- * placeholders so that the Axios-based services have a single place to update.
- * Replace them with the real API documentation and set VITE_USE_MOCK_API=false
- * only after the endpoints respond.
- */
 export const endpoints = {
   auth: {
     me: '/auth/me',
@@ -27,6 +19,7 @@ export const endpoints = {
     list: '/projects',
     detail: (id) => `/projects/${id}`,
     submissions: (id) => `/projects/${id}/submissions`,
+    workFile: (id, fileId) => `/projects/${id}/work-files/${fileId}`,
     approve: (id) => `/projects/${id}/approve`,
     requestRevision: (id) => `/projects/${id}/request-revision`,
   },
@@ -44,7 +37,6 @@ export const endpoints = {
   transactions: {
     list: '/transactions',
     detail: (id) => `/transactions/${id}`,
-    withdraw: '/transactions/withdraw',
   },
   messages: {
     threads: '/messages/threads',

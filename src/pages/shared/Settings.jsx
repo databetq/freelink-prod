@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import {
   Bell,
   ChevronRight,
   Database,
   LogOut,
-  RotateCcw,
   ShieldCheck,
   Trash2,
   UserRound,
@@ -17,11 +16,9 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/common/Button'
 import { Avatar } from '@/components/common/Avatar'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
-import { InfoBanner } from '@/components/common/InfoBanner'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { appConfig } from '@/config/appConfig'
 import { contractConfig, isContractConfigured } from '@/config/contractConfig'
-import { resetDb } from '@/services/mocks/mockDb'
 import { cn } from '@/utils/cn'
 
 const PREF_KEY = 'freelink.preferences'
@@ -92,10 +89,7 @@ export default function Settings() {
   const handleConfirm = async () => {
     setBusy(true)
     try {
-      if (confirm === 'reset') {
-        resetDb()
-        toast.success('รีเซ็ตข้อมูลตัวอย่างแล้ว', 'mock database กลับไปเป็นค่าเริ่มต้น')
-      } else if (confirm === 'saved') {
+      if (confirm === 'saved') {
         window.localStorage.removeItem('freelink.savedJobs')
         toast.success('ล้างรายการงานที่บันทึกแล้ว')
       } else if (confirm === 'logout') {
@@ -105,10 +99,14 @@ export default function Settings() {
         return
       }
       setConfirm(null)
+    } catch (error) {
+      toast.error('ดำเนินการไม่สำเร็จ', error.message)
     } finally {
       setBusy(false)
     }
   }
+
+  if (role === 'admin') return <Navigate to="/admin" replace />
 
   const profilePath = role === 'client' ? '/client/profile' : '/freelancer/profile'
 
@@ -117,7 +115,7 @@ export default function Settings() {
       <PageHeader
         eyebrow="Settings"
         title="ตั้งค่า"
-        description="จัดการบัญชี การแจ้งเตือน และข้อมูลตัวอย่างที่ใช้ทดลองระบบ"
+        description="จัดการบัญชี การแจ้งเตือน และรายการที่บันทึกไว้"
       />
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
@@ -134,9 +132,6 @@ export default function Settings() {
                     label={role === 'client' ? 'Client' : 'Freelancer'}
                     tone={role === 'client' ? 'blue' : 'violet'}
                   />
-                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-semibold text-amber-700">
-                    Mock session
-                  </span>
                 </div>
               </div>
               <Button to={profilePath} variant="secondary" size="sm" icon={UserRound}>
@@ -152,22 +147,12 @@ export default function Settings() {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">ผู้ให้บริการยืนยันตัวตน</p>
                 <p className="mt-0.5 text-[11.5px] text-ink-600">
-                  {user?.provider === 'google-mock' ? 'Google (Mock)' : 'Demo session'}
+                  Google
                 </p>
               </div>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={async () => {
-                  await signOut()
-                  navigate('/login')
-                }}
-              >
-                สลับบทบาท / เข้าสู่ระบบใหม่
-              </Button>
               <Button variant="danger-ghost" size="sm" icon={LogOut} onClick={() => setConfirm('logout')}>
                 ออกจากระบบ
               </Button>
@@ -213,24 +198,9 @@ export default function Settings() {
           <section className="card p-5">
             <h2 className="flex items-center gap-2 text-sm font-bold">
               <Database className="h-4 w-4 text-brand-600" />
-              ข้อมูลตัวอย่าง
+              ข้อมูลในเบราว์เซอร์
             </h2>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-ink-500">
-              mock database ถูกเก็บใน localStorage ของเบราว์เซอร์ — การรีเซ็ตจะคืนค่าข้อมูลทั้งหมด
-              รวมถึงข้อเสนอ โครงการ และรีวิวที่คุณสร้างระหว่างทดลอง
-            </p>
             <div className="mt-4 space-y-2">
-              <button
-                type="button"
-                onClick={() => setConfirm('reset')}
-                className="flex w-full items-center justify-between rounded-xl border border-ink/[0.08] bg-white px-3.5 py-2.5 text-left transition hover:border-brand-300"
-              >
-                <span className="flex items-center gap-2 text-[11.5px] font-semibold text-ink">
-                  <RotateCcw className="h-3.5 w-3.5 text-ink-400" />
-                  รีเซ็ตข้อมูล mock ทั้งหมด
-                </span>
-                <ChevronRight className="h-3.5 w-3.5 text-ink-300" />
-              </button>
               <button
                 type="button"
                 onClick={() => setConfirm('saved')}
@@ -250,12 +220,6 @@ export default function Settings() {
           <section className="card p-5">
             <h2 className="text-sm font-bold">สถานะระบบ</h2>
             <div className="mt-3 space-y-2.5 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="text-ink-500">โหมดข้อมูล</span>
-                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9.5px] font-bold text-amber-700">
-                  {appConfig.useMockApi ? 'MOCK' : 'API'}
-                </span>
-              </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-ink-500">API base URL</span>
                 <span className="max-w-[160px] truncate text-right font-mono text-[9.5px] text-ink-600">
@@ -277,16 +241,7 @@ export default function Settings() {
                 <span className="text-ink-500">Chain ID</span>
                 <span className="font-semibold text-ink">{contractConfig.chainId || '—'}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-ink-500">Google OAuth client</span>
-                <span className="font-semibold text-ink">
-                  {appConfig.googleClientId ? 'ตั้งค่าแล้ว' : 'ยังไม่ตั้งค่า'}
-                </span>
-              </div>
             </div>
-            <InfoBanner tone="warning" className="mt-3" title="ยังไม่เชื่อมต่อระบบจริง">
-              ตั้งค่า API และ Contract ได้จากไฟล์ .env ตามตัวอย่างใน .env.example
-            </InfoBanner>
           </section>
 
           <section className="card p-5">
@@ -296,15 +251,10 @@ export default function Settings() {
             </h2>
             <ul className="mt-2.5 space-y-2 text-[11px] leading-relaxed text-ink-500">
               <li>• ไม่มีการเก็บรหัสผ่านหรือ private key ใน Frontend</li>
-              <li>• Mock session เก็บใน localStorage และล้างได้ทันที</li>
               <li>• Wallet ลงนามธุรกรรมในอุปกรณ์ของคุณเท่านั้น</li>
               <li>• ไม่มี API key หรือ secret ฝังใน bundle</li>
             </ul>
           </section>
-
-          <Button to="/admin/users" variant="secondary" size="md" className="w-full">
-            เปิด Admin Console (Demo)
-          </Button>
         </aside>
       </div>
 
@@ -314,16 +264,12 @@ export default function Settings() {
         onConfirm={handleConfirm}
         loading={busy}
         title={
-          confirm === 'reset'
-            ? 'รีเซ็ตข้อมูล mock ทั้งหมด?'
-            : confirm === 'saved'
+          confirm === 'saved'
               ? 'ล้างรายการที่บันทึกไว้?'
               : 'ออกจากระบบ?'
         }
         description={
-          confirm === 'reset'
-            ? 'ข้อเสนอ โครงการ รีวิว และการแก้ไขทั้งหมดที่ทำกับ mock data จะหายไปและกลับไปเป็นค่าเริ่มต้น'
-            : confirm === 'saved'
+          confirm === 'saved'
               ? 'รายการงานที่คุณบันทึกไว้ในเบราว์เซอร์จะถูกล้าง'
               : 'คุณจะกลับไปหน้าแรกและต้องเข้าสู่ระบบใหม่เพื่อใช้งานแดชบอร์ด'
         }

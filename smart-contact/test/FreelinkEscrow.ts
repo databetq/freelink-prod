@@ -84,7 +84,10 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
 
   async function active() {
     const c = await funded();
-    await c.escrow.write.acceptEscrow([c.escrowId, c.termsHash], as(freelancer));
+    await c.escrow.write.acceptEscrow(
+      [c.escrowId, c.termsHash, WAGE, c.deadline],
+      as(freelancer),
+    );
     return c;
   }
 
@@ -199,7 +202,10 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
       assert.equal(await balanceOf(escrow.address), TOTAL);
 
       await viem.assertions.emitWithArgs(
-        escrow.write.acceptEscrow([escrowId, termsHash], as(freelancer)),
+        escrow.write.acceptEscrow(
+          [escrowId, termsHash, WAGE, deadline],
+          as(freelancer),
+        ),
         escrow,
         "EscrowAccepted",
         [escrowId, A(freelancer)],
@@ -371,32 +377,81 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
 
   describe("ยอมรับงาน (acceptEscrow)", () => {
     it("เฉพาะ freelancer ที่ระบุ, ต้องส่ง termsHash ตรง, ยอมรับได้ครั้งเดียว", async () => {
-      const { escrow, termsHash, escrowId } =
+      const { escrow, termsHash, deadline, escrowId } =
         await networkHelpers.loadFixture(funded);
       await viem.assertions.revertWithCustomError(
-        escrow.write.acceptEscrow([escrowId, termsHash], as(stranger)),
-        escrow,
-        "NotAuthorized",
-      );
-      await viem.assertions.revertWithCustomError(
-        escrow.write.acceptEscrow([escrowId, termsHash], as(client)),
+        escrow.write.acceptEscrow(
+          [escrowId, termsHash, WAGE, deadline],
+          as(stranger),
+        ),
         escrow,
         "NotAuthorized",
       );
       await viem.assertions.revertWithCustomError(
         escrow.write.acceptEscrow(
-          [escrowId, idOf("terms-v2-ที่ไม่ตรง")],
+          [escrowId, termsHash, WAGE, deadline],
+          as(client),
+        ),
+        escrow,
+        "NotAuthorized",
+      );
+      await viem.assertions.revertWithCustomError(
+        escrow.write.acceptEscrow(
+          [escrowId, idOf("terms-v2-ที่ไม่ตรง"), WAGE, deadline],
           as(freelancer),
         ),
         escrow,
         "InvalidTerms",
       );
 
-      await escrow.write.acceptEscrow([escrowId, termsHash], as(freelancer));
+      await escrow.write.acceptEscrow(
+        [escrowId, termsHash, WAGE, deadline],
+        as(freelancer),
+      );
       await viem.assertions.revertWithCustomError(
-        escrow.write.acceptEscrow([escrowId, termsHash], as(freelancer)),
+        escrow.write.acceptEscrow(
+          [escrowId, termsHash, WAGE, deadline],
+          as(freelancer),
+        ),
         escrow,
         "InvalidStatus",
+      );
+    });
+
+    it("ยอดเงินหรือ deadline ที่ฝากไม่ตรงกับข้อตกลง → freelancer รับงานไม่ได้ (TermsMismatch)", async () => {
+      const { escrow, termsHash, deadline, escrowId } =
+        await networkHelpers.loadFixture(funded);
+      // client ฝาก 1 ETH แต่ข้อตกลงที่ freelancer เห็นคือ 2 ETH
+      await viem.assertions.revertWithCustomError(
+        escrow.write.acceptEscrow(
+          [escrowId, termsHash, parseEther("2"), deadline],
+          as(freelancer),
+        ),
+        escrow,
+        "TermsMismatch",
+      );
+      // deadline บน chain เร็วกว่าที่ตกลงไว้ 1 วัน
+      await viem.assertions.revertWithCustomError(
+        escrow.write.acceptEscrow(
+          [escrowId, termsHash, WAGE, deadline + DAY],
+          as(freelancer),
+        ),
+        escrow,
+        "TermsMismatch",
+      );
+      assert.equal(
+        (await escrow.read.getEscrow([escrowId])).status,
+        Status.Funded,
+      );
+
+      // ตรงทุกค่าแล้วรับงานได้
+      await escrow.write.acceptEscrow(
+        [escrowId, termsHash, WAGE, deadline],
+        as(freelancer),
+      );
+      assert.equal(
+        (await escrow.read.getEscrow([escrowId])).status,
+        Status.Active,
       );
     });
 
@@ -404,7 +459,10 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
       const c = await networkHelpers.loadFixture(funded);
       await time.increaseTo(c.deadline + 1n);
       await viem.assertions.revertWithCustomError(
-        c.escrow.write.acceptEscrow([c.escrowId, c.termsHash], as(freelancer)),
+        c.escrow.write.acceptEscrow(
+          [c.escrowId, c.termsHash, WAGE, c.deadline],
+          as(freelancer),
+        ),
         c.escrow,
         "DeadlinePassed",
       );
@@ -643,7 +701,7 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
   });
 
   describe("ข้อพิพาท (dispute)", () => {
-    it("เปิด dispute: บันทึก arbiter ณ ตอนนั้น, client ปล่อยเงินเองไม่ได้ระหว่างพิพาท", async () => {
+    it("เปิด dispute: บันทึก arbiter ณ ตอนนั้น, client ขอเงินคืนเองไม่ได้ระหว่างพิพาท", async () => {
       const { escrow, escrowId } = await networkHelpers.loadFixture(active);
       await viem.assertions.emitWithArgs(
         escrow.write.openDispute([escrowId, "client ไม่ตอบกลับ"], as(freelancer)),
@@ -657,14 +715,67 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
       assert.equal(getAddress(e.arbiter), A(arbiter));
 
       await viem.assertions.revertWithCustomError(
-        escrow.write.releasePayment([escrowId], as(client)),
-        escrow,
-        "InvalidStatus",
-      );
-      await viem.assertions.revertWithCustomError(
         escrow.write.refundClient([escrowId], as(client)),
         escrow,
         "InvalidStatus",
+      );
+    });
+
+    it("ระหว่างพิพาท client ยอมแพ้ด้วยการปล่อยเงินได้ (ค่าธรรมเนียมคิดเต็ม) แล้ว arbiter ตัดสินซ้ำไม่ได้", async () => {
+      const c = await networkHelpers.loadFixture(disputed);
+      const { receipt, deltas } = await exec(
+        () => c.escrow.write.releasePayment([c.escrowId], as(client)),
+        [A(freelancer), A(treasury)],
+      );
+      assert.deepEqual(deltas, [WAGE, FEE]);
+      assert.deepEqual(eventArgs(c, receipt, "PaymentReleased"), {
+        escrowId: c.escrowId,
+        freelancer: A(freelancer),
+        amountToFreelancer: WAGE,
+        fee: FEE,
+      });
+      assert.equal(await statusOf(c), Status.Released);
+      assert.equal(await balanceOf(c.escrow.address), 0n);
+
+      await viem.assertions.revertWithCustomError(
+        c.escrow.write.resolveDispute([c.escrowId, 0], as(arbiter)),
+        c.escrow,
+        "InvalidStatus",
+      );
+    });
+
+    it("ระหว่างพิพาท freelancer ยอมแพ้ด้วยการคืนเงินได้ (client ได้คืนเต็มรวมค่าธรรมเนียม)", async () => {
+      const c = await networkHelpers.loadFixture(disputed);
+      const { deltas } = await exec(
+        () => c.escrow.write.refundClient([c.escrowId], as(freelancer)),
+        [A(client), A(treasury)],
+      );
+      assert.deepEqual(deltas, [TOTAL, 0n]);
+      assert.equal(await statusOf(c), Status.Refunded);
+
+      await viem.assertions.revertWithCustomError(
+        c.escrow.write.settleExpiredDispute([c.escrowId], as(client)),
+        c.escrow,
+        "InvalidStatus",
+      );
+    });
+
+    it("ระหว่างพิพาทยอมแพ้ได้เฉพาะฝั่งที่เสียเปรียบเอง: freelancer ปล่อยเงินให้ตัวเองไม่ได้, คนอื่นทำไม่ได้", async () => {
+      const { escrow, escrowId } = await networkHelpers.loadFixture(disputed);
+      await viem.assertions.revertWithCustomError(
+        escrow.write.releasePayment([escrowId], as(freelancer)),
+        escrow,
+        "NotAuthorized",
+      );
+      await viem.assertions.revertWithCustomError(
+        escrow.write.releasePayment([escrowId], as(arbiter)),
+        escrow,
+        "NotAuthorized",
+      );
+      await viem.assertions.revertWithCustomError(
+        escrow.write.refundClient([escrowId], as(stranger)),
+        escrow,
+        "NotAuthorized",
       );
     });
 
@@ -850,9 +961,59 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
         c.escrow.address,
       ]);
       await dep(c, { to: mock.address });
-      await mock.write.accept([c.escrowId, c.termsHash]);
+      await mock.write.accept([c.escrowId, c.termsHash, WAGE, c.deadline]);
       return { ...c, mock };
     }
+
+    async function withReturnBomb() {
+      const c = await setup();
+      const bomb = await viem.deployContract("ReturnBombMock", [
+        c.escrow.address,
+      ]);
+      await dep(c, { to: bomb.address });
+      await bomb.write.accept([c.escrowId, c.termsHash, WAGE, c.deadline]);
+      await c.escrow.write.openDispute([c.escrowId, "งานไม่ครบ"], as(client));
+      return { ...c, bomb };
+    }
+
+    // gas สูงเหมือนผู้ใช้ที่ตั้ง gas เผื่อไว้มาก ยิ่งให้ gas มาก ผู้รับยิ่งตอบกลับข้อมูลก้อนใหญ่ได้
+    const BIG_GAS = { gas: 15_000_000n };
+
+    it("freelancer เป็น contract ที่ตอบกลับข้อมูลก้อนใหญ่ (returndata bomb) → ขวางคำตัดสินแบบแบ่งเงินไม่ได้", async () => {
+      const { escrow, bomb, escrowId } =
+        await networkHelpers.loadFixture(withReturnBomb);
+      // freelancer 0.3, แพลตฟอร์ม 0.015, client 0.7 + 0.035 = 0.735
+      const { deltas } = await exec(
+        () =>
+          escrow.write.resolveDispute([escrowId, 3000], {
+            ...as(arbiter),
+            ...BIG_GAS,
+          }),
+        [bomb.address, A(treasury), A(client)],
+      );
+      assert.deepEqual(deltas, [
+        parseEther("0.3"),
+        parseEther("0.015"),
+        parseEther("0.735"),
+      ]);
+      assert.equal(await balanceOf(escrow.address), 0n);
+    });
+
+    it("returndata bomb ขวางการแบ่งครึ่งตอน arbiter เงียบไม่ได้ (เงินไม่ค้างตลอดไป)", async () => {
+      const { escrow, bomb, escrowId } =
+        await networkHelpers.loadFixture(withReturnBomb);
+      await time.increase(ARBITER_TIMEOUT + 1n);
+      const { deltas } = await exec(
+        () =>
+          escrow.write.settleExpiredDispute([escrowId], {
+            ...as(client),
+            ...BIG_GAS,
+          }),
+        [bomb.address, A(client)],
+      );
+      assert.deepEqual(deltas, [parseEther("0.5"), parseEther("0.525")]);
+      assert.equal(await balanceOf(escrow.address), 0n);
+    });
 
     it("freelancer ปฏิเสธ ETH → ปล่อยเงินไม่ล้ม ยอดค้างไว้ให้เบิกเอง และค่าธรรมเนียมไม่ถูกขวาง", async () => {
       const c = await networkHelpers.loadFixture(withMockFreelancer);
@@ -1035,7 +1196,10 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
       const c = await networkHelpers.loadFixture(setup);
       const far = BigInt(await time.latest()) + 30n * DAY;
       await dep(c, { deadline: far });
-      await c.escrow.write.acceptEscrow([c.escrowId, c.termsHash], as(freelancer));
+      await c.escrow.write.acceptEscrow(
+        [c.escrowId, c.termsHash, WAGE, far],
+        as(freelancer),
+      );
       await c.escrow.write.submitWork([c.escrowId, idOf("w")], as(freelancer));
       await requestRevision(c);
       assert.equal((await c.escrow.read.getEscrow([c.escrowId])).deadline, far);
@@ -1109,7 +1273,10 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
       const escrowId = await escrow.read.computeEscrowId([A(client), projectId]);
       const c = { escrow, projectId, termsHash, deadline, escrowId };
       await dep(c);
-      await escrow.write.acceptEscrow([escrowId, termsHash], as(freelancer));
+      await escrow.write.acceptEscrow(
+        [escrowId, termsHash, WAGE, deadline],
+        as(freelancer),
+      );
       await escrow.write.submitWork([escrowId, idOf("w")], as(freelancer));
       await viem.assertions.revertWithCustomError(
         escrow.write.requestRevision([escrowId, "x"], as(client)),
@@ -1273,7 +1440,10 @@ describe("FreelinkEscrow v2 (native ETH)", async function () {
           const [, total] = await escrow.read.quote([amount]);
 
           await dep(c, { projectId, deadline, amount, value: total });
-          await escrow.write.acceptEscrow([id, termsHash], as(freelancer));
+          await escrow.write.acceptEscrow(
+            [id, termsHash, amount, deadline],
+            as(freelancer),
+          );
           await escrow.write.openDispute([id, "t"], as(client));
 
           const { receipt } = await exec(

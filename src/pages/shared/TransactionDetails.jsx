@@ -50,7 +50,7 @@ export default function TransactionDetails() {
   const status = transactionStatus[transaction.status]
   const direction = directionMap[transaction.type] || 'out'
   const explorerUrl = transaction.hash ? getExplorerTxUrl(transaction.hash) : null
-  const isMock = transaction.isMock || !transaction.hash
+  const hasHash = Boolean(transaction.hash)
 
   const StatusIcon =
     transaction.status === 'confirmed' ? CheckCircle2 : transaction.status === 'pending' ? Clock3 : XCircle
@@ -125,10 +125,10 @@ export default function TransactionDetails() {
                 <span
                   className={cn(
                     'rounded-full px-2 py-0.5 text-[9.5px] font-bold',
-                    isMock ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700',
+                    hasHash ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700',
                   )}
                 >
-                  {isMock ? 'MOCK LEDGER' : 'BLOCKCHAIN'}
+                  {hasHash ? 'BLOCKCHAIN' : 'ยังไม่มี HASH'}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -164,7 +164,7 @@ export default function TransactionDetails() {
               </div>
             ) : (
               <InfoBanner tone="warning" className="mt-3" title="ไม่มี transaction hash">
-                รายการนี้เป็นข้อมูลจำลอง ไม่ได้เกิดขึ้นบน blockchain จึงไม่มี hash หรือ block number
+                ยังไม่มี transaction hash สำหรับรายการนี้
                 ให้ตรวจสอบ — hash จะแสดงเฉพาะธุรกรรมจริงที่ยืนยันจาก Wallet เท่านั้น
               </InfoBanner>
             )}
@@ -178,12 +178,12 @@ export default function TransactionDetails() {
                 {
                   label: transaction.status === 'pending' ? 'รอดำเนินการ' : 'ดำเนินการแล้ว',
                   done: transaction.status !== 'pending',
-                  time: transaction.status === 'pending' ? 'รอการอนุมัติ' : 'mock ledger',
+                  time: transaction.status === 'pending' ? 'รอการอนุมัติ' : '—',
                 },
                 {
                   label: transaction.status === 'confirmed' ? 'ยืนยันแล้ว' : 'ยังไม่ยืนยัน',
                   done: transaction.status === 'confirmed',
-                  time: transaction.status === 'confirmed' ? 'ยืนยันใน mock ledger' : '—',
+                  time: transaction.status === 'confirmed' ? 'ยืนยันแล้ว' : '—',
                 },
               ].map((step, index, list) => (
                 <li key={step.label} className="relative flex gap-3 pb-6 last:pb-0">

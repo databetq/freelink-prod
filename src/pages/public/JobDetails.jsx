@@ -72,7 +72,9 @@ export default function JobDetails() {
   const isOwner = user?.role === 'client' && job && user.profileId === job.clientId
   const isFreelancer = user?.role === 'freelancer'
   const saved = job ? isSaved(job.id) : false
-  const status = job ? jobStatus[job.status] : null
+  const status = job?.projectCompleted
+    ? job.projectPaid ? { label: 'โครงการเสร็จสิ้น', tone: 'emerald' } : { label: 'งานเสร็จ · รอจ่ายเงิน', tone: 'amber' }
+    : jobStatus[job?.status]
   const category = job ? categoryMap[job.category] : null
   const CategoryIcon = category?.icon
   const experience = experienceLevels.find((level) => level.value === job?.experience)
@@ -378,9 +380,6 @@ export default function JobDetails() {
               </div>
             </div>
 
-            <InfoBanner tone="warning" className="mt-3" title="ข้อมูลจำลอง">
-              ประกาศงานนี้เป็น mock data สำหรับทดสอบ UI และ workflow เท่านั้น
-            </InfoBanner>
           </aside>
         </div>
       </div>

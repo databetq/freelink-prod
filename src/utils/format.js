@@ -1,12 +1,12 @@
 import { appConfig } from '@/config/appConfig'
 
-export function formatCurrency(amount, { compact = false, showSymbol = true } = {}) {
+export function formatCurrency(amount, { compact = false, showSymbol = true, maximumFractionDigits = compact ? 1 : 0 } = {}) {
   if (amount === null || amount === undefined || Number.isNaN(Number(amount))) return '—'
   const value = Number(amount)
   const formatter = new Intl.NumberFormat(appConfig.locale, {
     style: showSymbol ? 'currency' : 'decimal',
     currency: appConfig.currency,
-    maximumFractionDigits: compact ? 1 : 0,
+    maximumFractionDigits,
     notation: compact && Math.abs(value) >= 10000 ? 'compact' : 'standard',
   })
   return formatter.format(value)
@@ -25,6 +25,13 @@ export function formatDate(value, options = {}) {
     year: 'numeric',
     ...options,
   }).format(new Date(value))
+}
+
+/** Today as YYYY-MM-DD in the browser's own calendar (toISOString would shift it to UTC). */
+export function todayISODate() {
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
 export function timeAgo(value) {

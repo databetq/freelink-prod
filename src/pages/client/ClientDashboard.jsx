@@ -40,11 +40,11 @@ export default function ClientDashboard() {
   useDocumentTitle('แดชบอร์ดลูกค้า')
   const { user, profileId } = useAuth()
 
-  const { data: projects, loading: projectsLoading } = useAsync(
+  const { data: projects, loading: projectsLoading, error: projectsError } = useAsync(
     () => projectService.listProjects({ role: 'client', profileId }),
     [profileId],
   )
-  const { data: jobs, loading: jobsLoading } = useAsync(
+  const { data: jobs, loading: jobsLoading, error: jobsError } = useAsync(
     () => jobService.listClientJobs(profileId),
     [profileId],
   )
@@ -83,36 +83,38 @@ export default function ClientDashboard() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-6" title="โหมดข้อมูลจำลอง">
-        ตัวเลขและรายการทั้งหมดในแดชบอร์ดนี้เป็น mock data — ยังไม่ได้เชื่อมต่อ Backend จริง
-      </InfoBanner>
 
+      {(jobsError || projectsError) && (
+        <InfoBanner tone="warning" className="mb-4" title="โหลดข้อมูลแดชบอร์ดไม่ครบ">
+          {(jobsError || projectsError).message}
+        </InfoBanner>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="โครงการที่กำลังดำเนินการ"
-          value={projectsLoading ? '—' : stats.active.length}
+          value={projectsLoading || projectsError ? '—' : stats.active.length}
           hint={`${stats.completed.length} โครงการที่จบแล้ว`}
           icon={FolderKanban}
           tone="brand"
         />
         <StatCard
           label="ประกาศที่เปิดรับ"
-          value={jobsLoading ? '—' : stats.openJobs.length}
+          value={jobsLoading || jobsError ? '—' : stats.openJobs.length}
           hint="รอข้อเสนอจากฟรีแลนซ์"
           icon={Briefcase}
           tone="blue"
         />
         <StatCard
           label="ข้อเสนอที่ได้รับ"
-          value={jobsLoading ? '—' : stats.proposals}
+          value={jobsLoading || jobsError ? '—' : stats.proposals}
           hint="จากทุกประกาศของคุณ"
           icon={FileText}
           tone="violet"
         />
         <StatCard
           label="เงินใน Escrow"
-          value={projectsLoading ? '—' : formatCurrency(stats.escrow, { compact: true })}
-          hint="คุ้มครองจนกว่าจะตรวจรับ"
+          value={projectList.some((project) => project.escrowAmount != null) ? formatCurrency(stats.escrow, { compact: true }) : '—'}
+          hint="ตรวจสถานะจากหน้า Escrow ของโครงการ"
           icon={ShieldCheck}
           tone="emerald"
         />
@@ -292,7 +294,7 @@ export default function ClientDashboard() {
             <div className="mt-4 flex items-start gap-2 rounded-xl bg-emerald-50/70 p-3">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
               <p className="text-[10.5px] leading-relaxed text-emerald-800">
-                Escrow ในหน้านี้เป็นข้อมูลจำลอง การโอนเงินจริงต้องรอ Smart Contract
+                ดูผลการฝากและปล่อยเงินจากหน้า Escrow ของแต่ละโครงการ
               </p>
             </div>
           </section>

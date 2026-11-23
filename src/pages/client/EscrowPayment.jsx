@@ -1,525 +1,386 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { formatEther, isAddress } from 'ethers'
-import {
-  ArrowRight,
-  CheckCircle2,
-  CircleDollarSign,
-  Clock3,
-  ExternalLink,
-  Info,
-  LockKeyhole,
-  ShieldCheck,
-  Wallet,
-} from 'lucide-react'
-import { useAsync } from '@/hooks/useAsync'
-import { useDocumentTitle } from '@/hooks/useDocumentTitle'
-import { useWallet } from '@/contexts/WalletContext'
-import { useToast } from '@/contexts/ToastContext'
-import { useAuth } from '@/contexts/AuthContext'
-import { projectService } from '@/services/api/projectService'
-import { transactionService } from '@/services/api/transactionService'
-import * as contractService from '@/services/blockchain/contractService'
-import { TX_STATUS, executeTransaction, getExplorerAddressUrl } from '@/services/blockchain/transactionService'
-import { contractConfig, getMissingContractConfig, isContractConfigured } from '@/config/contractConfig'
-import { PageHeader } from '@/components/common/PageHeader'
+import { formatEther } from 'ethers'
 import { Button } from '@/components/common/Button'
+import { ErrorState } from '@/components/common/ErrorState'
+import { InfoBanner } from '@/components/common/InfoBanner'
+import { PageLoader } from '@/components/common/LoadingSkeleton'
+import { PageHeader } from '@/components/common/PageHeader'
+import { ReviewPaymentStatus } from '@/components/projects/ReviewPaymentStatus'
+import { EscrowPrepareForm } from '@/components/wallet/EscrowPrepareForm'
+import { EscrowTerms } from '@/components/wallet/EscrowTerms'
 import { WalletConnectButton } from '@/components/wallet/WalletConnectButton'
 import { TransactionStatus } from '@/components/wallet/TransactionStatus'
-import { StatusBadge } from '@/components/common/StatusBadge'
-import { InfoBanner } from '@/components/common/InfoBanner'
-import { EmptyState } from '@/components/common/EmptyState'
-import { ErrorState } from '@/components/common/ErrorState'
-import { PageLoader } from '@/components/common/LoadingSkeleton'
-import { escrowStatus } from '@/constants'
-import { formatCurrency, formatDate, shortAddress } from '@/utils/format'
-import { cn } from '@/utils/cn'
+import { contractConfig } from '@/config/contractConfig'
+import { useAuth } from '@/contexts/AuthContext'
+import { useWallet } from '@/contexts/WalletContext'
+import { useAsync } from '@/hooks/useAsync'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { escrowService } from '@/services/api/escrowService'
+import { projectService } from '@/services/api/projectService'
+import * as contract from '@/services/blockchain/contractService'
+import { normalizeWalletError } from '@/services/blockchain/errors'
+import { executeTransaction, getExplorerTxUrl, TX_STATUS } from '@/services/blockchain/transactionService'
 
-// Shown only until the real fee (feeBps) is read from the contract.
-const PLATFORM_FEE_RATE = 0.05
-
-/** wei -> "0.525" (max 6 decimals, trailing zeros trimmed). Display only. */
-function formatEth(wei) {
-  if (wei === null || wei === undefined) return '—'
-  const text = Number(formatEther(wei)).toFixed(6).replace(/\.?0+$/, '')
-  return `${text || '0'} ETH`
+const labels = {
+  prepared: 'รอฝากเงิน', funded: 'ยืนยันการฝากเงินแล้ว', released: 'จ่ายเงินแล้ว',
+  refunded: 'คืนเงินแล้ว', resolved: 'ข้อพิพาทสิ้นสุดแล้ว', expired: 'ข้อตกลงหมดอายุ',
+}
+const txErrors = {
+  ESCROW_TX_REVERTED: 'ธุรกรรมถูก revert',
+  ESCROW_EVENT_MISMATCH: 'ธุรกรรมนี้ไม่มี event ที่ตรงกับข้อตกลง',
+  ESCROW_CONSENT_REQUIRED: 'ไม่มีการยอมรับข้อตกลงของคนจ้างก่อนฝาก',
+}
+const txMessages = {
+  EscrowFunded: 'ยืนยันการฝากเงินแล้ว',
+  PaymentReleased: 'ยืนยันการจ่ายเงินแล้ว',
+  EscrowRefunded: 'ยืนยันการคืนเงินแล้ว',
+  DisputeResolved: 'ยืนยันผลข้อพิพาทแล้ว',
 }
 
 export default function EscrowPayment() {
   const { projectId } = useParams()
-  const wallet = useWallet()
-  const toast = useToast()
-  const { user } = useAuth()
-  const { data: project, loading, error, refresh } = useAsync(
-    () => projectService.getProject(projectId),
-    [projectId],
-  )
-  useDocumentTitle(project ? `Escrow — ${project.title}` : 'Escrow')
+  return <ProjectEscrow key={projectId} projectId={projectId} />
+}
 
-  const { data: transactions } = useAsync(() => transactionService.list(user?.id), [user?.id])
-  const [tx, setTx] = useState({ status: TX_STATUS.IDLE, hash: null, error: null })
-  const [busy, setBusy] = useState(false)
-
-  const missing = getMissingContractConfig()
-  const configured = isContractConfigured()
-
-  const projectTransactions = useMemo(
-    () => (transactions || []).filter((transaction) => transaction.projectId === projectId),
-    [transactions, projectId],
-  )
-
-  // Real numbers from the contract: quote, policy and this wallet's escrow for this project.
-  const chainReady = configured && wallet.isConnected && !wallet.isWrongNetwork
-  const { data: chain, error: chainError, refresh: refreshChain } = useAsync(async () => {
-    if (!chainReady || !project) return null
-    const amountWei = contractConfig.thbPerEth ? contractService.thbToWei(project.budget, contractConfig.thbPerEth) : null
-    const escrowId = contractService.getEscrowId({ clientAddress: wallet.address, projectId: project.id })
-    const [quote, policy, onChain] = await Promise.all([
-      amountWei ? contractService.quote(amountWei) : null,
-      contractService.readPolicy(),
-      contractService.readEscrow({ escrowId }),
-    ])
-    return { amountWei, escrowId, quote, policy, onChain }
-  }, [chainReady, wallet.address, wallet.chainId, project?.id, project?.budget])
-  const [freelancerInput, setFreelancerInput] = useState('')
-
+function ProjectEscrow({ projectId }) {
+  const { profileId } = useAuth()
+  const { data: project, loading, error, refresh } = useAsync(() => projectService.getProject(projectId), [projectId])
+  useDocumentTitle(project ? `Escrow · ${project.title}` : 'Escrow')
   if (loading) return <PageLoader />
   if (error || !project) return <ErrorState error={error} onRetry={refresh} />
+  return <EscrowWorkspace project={project} isClient={profileId === project.clientId} />
+}
 
-  if (project.clientId !== user?.profileId) {
-    return (
-      <EmptyState
-        title="คุณไม่มีสิทธิ์จัดการ Escrow ของโครงการนี้"
-        description="โครงการนี้เป็นของบัญชีลูกค้าอื่น"
-        action={
-          <Button to="/client/projects" variant="primary">
-            กลับไปโครงการของฉัน
-          </Button>
-        }
-      />
-    )
-  }
+function EscrowWorkspace({ project, isClient }) {
+  const wallet = useWallet()
+  const { data, loading, error, refresh, setData } = useAsync(() => escrowService.get(project.id), [project.id])
+  const [selection, setSelection] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState('')
 
-  const escrow = escrowStatus[project.escrowStatus]
-  const feeRate = chain?.policy ? chain.policy.feeBps / 10000 : PLATFORM_FEE_RATE
-  const fee = Math.round(project.budget * feeRate)
-  const total = project.budget + fee
-  const funded = project.escrowStatus !== 'unfunded'
-
-  // Wallet that will receive the pay. TODO(team): bind a wallet to each freelancer profile
-  // (FRONTEND_REVIEW_TH.md item 7); until then the client enters it and must double-check it.
-  const freelancerAddress = freelancerInput.trim() || project.freelancerWalletAddress || ''
-  const freelancerAddressValid = isAddress(freelancerAddress)
-  const onChain = chain?.onChain
-  const canRelease = Boolean(onChain && ['active', 'submitted'].includes(onChain.statusName))
-
-  const fail = (title, message) => {
-    setTx({ status: TX_STATUS.FAILED, hash: null, error: message })
-    toast.warning(title, message)
-  }
-
-  const handleDeposit = async () => {
-    setTx({ status: TX_STATUS.IDLE, hash: null, error: null })
-
-    if (!wallet.isConnected) {
+  useEffect(() => {
+    if (!data || busy) return undefined
+    let current = true
+    const interval = setInterval(async () => {
       try {
-        await wallet.connect()
+        const updated = await escrowService.get(project.id)
+        if (current) setData(updated)
       } catch {
-        return
+        // Keep showing the last verified agreement while the service is unreachable.
       }
-    }
+    }, 12000)
+    return () => { current = false; clearInterval(interval) }
+  }, [project.id, Boolean(data), busy, setData])
 
-    if (!configured) {
-      return fail('Smart Contract ยังไม่พร้อม', `ยังไม่สามารถฝากเงินได้: ขาด ${missing.join(', ')}`)
-    }
-    if (!contractConfig.thbPerEth) {
-      return fail('ยังไม่มีอัตราแลกเปลี่ยน', 'ยังไม่สามารถแปลงบาทเป็น ETH ได้: ขาด VITE_THB_PER_ETH')
-    }
-    if (wallet.isWrongNetwork) {
-      return fail('Wallet อยู่คนละ Network', `กรุณาสลับไป ${contractConfig.chainName} ก่อนฝากเงิน`)
-    }
-    if (!freelancerAddressValid) {
-      return fail('ยังไม่มี wallet ของ freelancer', 'กรอก address wallet ที่ freelancer ใช้รับเงินให้ถูกต้องก่อน')
-    }
-    if (onChain) {
-      return fail('ฝากเงินแล้ว', 'โปรเจกต์นี้มี escrow บน blockchain จาก wallet นี้อยู่แล้ว')
-    }
+  if (loading) return <PageLoader />
+  if (error || !data) return <ErrorState error={error} onRetry={refresh} />
+  const { agreements, tosText, proposedDeliveryDays, minDeadlineDays, approvedAgreementIds = [], deliverables } = data
+  const currentByNumber = new Map(agreements.map((item) => [item.milestoneNumber, item]))
+  const activeNumber = [...currentByNumber.values()].filter((item) => item.status === 'released').length + 1
+  const active = currentByNumber.get(activeNumber)
+  const agreement = agreements.find((item) => item.id === selection) || active || agreements.at(-1)
+  const plan = agreements.length ? JSON.parse(agreements[0].termsJson).milestones : null
+  const totalMilestones = plan?.length ?? 1
+  const needsPreparation = !['cancelled', 'completed'].includes(project.status) && activeNumber <= totalMilestones
+    && (!active || ['refunded', 'expired'].includes(active.status))
+  const nextReady = needsPreparation && activeNumber > 1 && !active
 
+  async function prepare(payload) {
     setBusy(true)
+    setFailure('')
     try {
-      const result = await executeTransaction(
-        () =>
-          contractService.depositEscrow({
-            projectId: project.id,
-            freelancerAddress,
-            deadline: contractService.buildDeadline(project),
-            termsHash: contractService.buildTermsHash(project),
-            amountWei: contractService.thbToWei(project.budget, contractConfig.thbPerEth),
-          }),
-        { onStatus: (next) => setTx(next) },
-      )
-      setTx((current) => ({
-        ...current,
-        status: result.status,
-        hash: result.hash || current.hash,
-        error: result.error || null,
-      }))
-      if (result.status === TX_STATUS.CONFIRMED) {
-        toast.success('ฝากเงินสำเร็จ', 'ได้รับการยืนยันจาก blockchain แล้ว')
-        refresh()
-        refreshChain()
-      }
+      const prepared = await escrowService.prepare(project.id, payload)
+      setSelection(prepared.id)
+      setData(await escrowService.get(project.id))
     } catch (err) {
-      setTx({ status: TX_STATUS.FAILED, hash: null, error: err.message })
-      toast.error('ฝากเงินไม่สำเร็จ', err.message)
+      setFailure(err.message)
     } finally {
       setBusy(false)
     }
   }
 
-  const handleRelease = async () => {
-    if (!configured) {
-      return fail('Smart Contract ยังไม่พร้อม', `ยังไม่สามารถปล่อยเงินได้: ขาด ${missing.join(', ')}`)
-    }
-    let clientAddress = wallet.address
-    if (!wallet.isConnected) {
-      try {
-        clientAddress = (await wallet.connect()).address
-      } catch {
-        return
-      }
-    }
+  const reload = async () => setData(await escrowService.get(project.id))
+  return (
+    <div>
+      <PageHeader title="ข้อตกลงและการจ่ายเงิน" description={project.title}
+        backTo={`/${isClient ? 'client' : 'freelancer'}/projects/${project.id}`} backLabel="กลับไปโครงการ" />
+      <div className="space-y-4">
+        {failure && <InfoBanner tone="danger">{failure}</InfoBanner>}
+        {isClient && nextReady && <InfoBanner title={`พร้อมเตรียมงวด ${activeNumber}`}>
+          ยืนยันการจ่ายเงินงวด {activeNumber - 1} แล้ว คุณเตรียมข้อตกลงงวดนี้ได้ทันที
+        </InfoBanner>}
+        {isClient && active?.status === 'funded' && activeNumber < totalMilestones && (
+          <InfoBanner title={`งวด ${activeNumber + 1} รอการยืนยันการจ่ายงวด ${activeNumber}`}>
+            ปุ่มสร้างและดูข้อตกลงจะขึ้นอัตโนมัติเมื่อระบบยืนยันการจ่ายงวดก่อน วันส่งตามแผนคือวันครบกำหนดส่งงาน คุณเตรียมงวดถัดไปได้ทันทีที่ปุ่มขึ้น
+          </InfoBanner>
+        )}
+        {isClient && activeNumber > totalMilestones && <InfoBanner>ยืนยันการจ่ายเงินครบทุกงวดแล้ว</InfoBanner>}
+        {!agreement && !isClient && <InfoBanner>รอคนจ้างเตรียมข้อตกลง เมื่อพร้อมแล้วคุณจะเห็นยอด กำหนดส่ง และรายการตรวจรับที่นี่</InfoBanner>}
+        {!agreement && isClient && <WalletConnectButton />}
+        {!agreement && isClient && wallet.isConnected && !wallet.isWrongNetwork && (
+          <LegacyEscrow projectId={project.id} clientAddress={wallet.address} />
+        )}
+        {isClient && needsPreparation && (
+          <EscrowPrepareForm key={`${activeNumber}:${active?.id}`} project={project} agreement={active}
+            milestoneNumber={activeNumber} hasPlan={agreements.length > 0} busy={busy} onPrepare={prepare}
+            proposedDeliveryDays={proposedDeliveryDays} minDeadlineDays={minDeadlineDays} deliverables={deliverables}
+            plannedDeadline={!active ? plan?.[activeNumber - 1]?.deadline : undefined} />
+        )}
+        {agreements.length > 1 && (
+          <label className="block text-sm font-medium">
+            งวดและรอบฝากที่แสดง
+            <select className="mt-1 block rounded-lg border border-ink/10 bg-white p-2" value={agreement.id}
+              onChange={(event) => setSelection(event.target.value)}>
+              {agreements.map((item) => <option key={item.id} value={item.id}>งวด {item.milestoneNumber} · รอบ {item.attemptNumber} · {labels[item.status]}</option>)}
+            </select>
+          </label>
+        )}
+        {agreement && <AgreementPayment key={agreement.id} agreement={agreement} projectId={project.id}
+          isClient={isClient} isActive={agreement.id === active?.id} workApproved={approvedAgreementIds.includes(agreement.id)} tosText={tosText} reload={reload} />}
+      </div>
+    </div>
+  )
+}
+
+function AgreementPayment({ agreement, projectId, isClient, isActive, workApproved, tosText, reload }) {
+  const wallet = useWallet()
+  const terms = JSON.parse(agreement.termsJson)
+  const termsHash = contract.hashTerms(agreement.termsJson)
+  const matchingHash = termsHash === agreement.termsHash && terms.projectId === projectId
+  const sameDeployment = terms.contract === contractConfig.contractAddress?.toLowerCase() && terms.chainId === contractConfig.chainId
+  const chainReady = matchingHash && sameDeployment && wallet.isConnected && wallet.chainId === terms.chainId
+  const signerReady = chainReady && wallet.address?.toLowerCase() === terms.client
+  const freelancerSignerReady = chainReady && wallet.address?.toLowerCase() === terms.freelancer
+  const [accepted, setAccepted] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [hash, setHash] = useState('')
+  const [broadcastHash, setBroadcastHash] = useState(null)
+  const [checkedResult, setCheckedResult] = useState(null)
+  const [acceptTx, setAcceptTx] = useState(null)
+  const { data: chain, loading: chainLoading, error: chainError, refresh: refreshChain } = useAsync(async () => {
+    if (!chainReady) return null
+    const [onChain, quote] = await Promise.all([
+      contract.readEscrow({ escrowId: agreement.expectedEscrowId }),
+      agreement.status === 'prepared' ? contract.quote(terms.amountWei) : null,
+    ])
+    return { onChain, quote }
+  }, [chainReady, wallet.address, agreement.id, agreement.status])
+  const pending = agreement.transactions.filter((tx) => tx.status === 'pending')
+  const checkedTransaction = agreement.transactions.find((tx) => tx.txHash === checkedResult?.txHash) || checkedResult
+  const waitingForOwnTransaction = broadcastHash && !agreement.transactions.some((tx) => tx.txHash === broadcastHash && tx.status !== 'pending')
+  const deposit = agreement.transactions.find((tx) => tx.event === 'EscrowFunded')
+  const onChain = chainReady ? chain?.onChain : null
+  const canDeposit = signerReady && agreement.status === 'prepared' && chain?.quote && !onChain && !waitingForOwnTransaction
+    && terms.deadline > Date.now() / 1000
+  const canRelease = signerReady && agreement.status === 'funded' && ['active', 'submitted'].includes(onChain?.statusName)
+  const chainTermsMatch = onChain && onChain.termsHash === termsHash && String(onChain.amount) === terms.amountWei
+    && onChain.client.toLowerCase() === terms.client && onChain.freelancer.toLowerCase() === terms.freelancer
+  const awaitingAcceptance = agreement.status === 'funded' && onChain?.statusName === 'funded'
+  const acceptanceDeadlinePassed = terms.deadline <= Date.now() / 1000
+  const canAccept = !isClient && freelancerSignerReady && awaitingAcceptance && chainTermsMatch
+    && onChain.deadline === terms.deadline && !acceptanceDeadlinePassed && !chainError && !chainLoading
+    && acceptTx?.status !== TX_STATUS.CONFIRMED
+  useEffect(() => {
+    if (!isClient || !awaitingAcceptance || busy || chainLoading) return undefined
+    const timer = setTimeout(refreshChain, 12000)
+    return () => clearTimeout(timer)
+  }, [isClient, awaitingAcceptance, busy, chainLoading, refreshChain])
+  const releaseAwaitingSync = agreement.status === 'funded' && chainTermsMatch && onChain.statusName === 'released'
+  let statusLabel = labels[agreement.status]
+  if (agreement.status === 'prepared') {
+    if (chainTermsMatch) statusLabel = 'พบ Escrow บนเครือข่าย · รอยืนยันในระบบ'
+    else if (pending.length > 0) statusLabel = 'กำลังตรวจธุรกรรมบนเครือข่าย'
+  }
+  if (releaseAwaitingSync) statusLabel = 'ปล่อยเงินแล้วบน Sepolia · รอยืนยันในระบบ'
+  const releasePending = releaseAwaitingSync || waitingForOwnTransaction || pending.some((tx) => tx.event === 'PaymentReleased')
+  const showReleaseProgress = isActive && agreement.status === 'funded' && (workApproved || releasePending || pending.length > 0)
+
+  async function verify(txHash) {
+    const result = await escrowService.recordTransaction(projectId, agreement.id, txHash)
+    await reload()
+    return result
+  }
+
+  async function record(event) {
+    event.preventDefault()
     setBusy(true)
+    setMessage('')
+    setCheckedResult(null)
     try {
-      const result = await executeTransaction(
-        () =>
-          contractService.releasePayment({
-            escrowId: contractService.getEscrowId({ clientAddress, projectId: project.id }),
-          }),
-        { onStatus: (next) => setTx(next) },
-      )
-      setTx((current) => ({
-        ...current,
-        status: result.status,
-        hash: result.hash || current.hash,
-        error: result.error || null,
-      }))
-      if (result.status === TX_STATUS.CONFIRMED) {
-        toast.success('ปล่อยเงินสำเร็จ', 'ธุรกรรมได้รับการยืนยันบน blockchain')
-        refresh()
-        refreshChain()
-      }
+      const result = await verify(hash.trim())
+      setCheckedResult(result)
+      setHash('')
+      refreshChain()
     } catch (err) {
-      setTx({ status: TX_STATUS.FAILED, hash: null, error: err.message })
+      setMessage(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function send(isDeposit) {
+    setBusy(true)
+    setMessage('')
+    setCheckedResult(null)
+    try {
+      if (isDeposit) {
+        await escrowService.consent(projectId, { agreementId: agreement.id, termsHash, tosVersion: terms.tosVersion, accepted })
+      }
+      const tx = isDeposit ? await contract.depositEscrow({
+        projectKey: terms.projectKey, clientAddress: terms.client, freelancerAddress: terms.freelancer,
+        deadline: terms.deadline, termsHash, amountWei: terms.amountWei, expectedTotal: chain.quote.total,
+      }) : await contract.releasePayment({ escrowId: agreement.escrowId, clientAddress: terms.client })
+      setBroadcastHash(tx.hash)
+      setHash(tx.hash)
+      const result = await verify(tx.hash)
+      if (result.status === 'rejected') setMessage(txErrors[result.error] || 'ตรวจสอบธุรกรรมไม่ผ่าน')
+      setHash('')
+      refreshChain()
+    } catch (err) {
+      setMessage(err.isApiError ? err.message : normalizeWalletError(err).message)
+      refreshChain()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function acceptWork() {
+    if (!canAccept || busy) return
+    setBusy(true)
+    setMessage('')
+    setCheckedResult(null)
+    try {
+      await executeTransaction(() => contract.acceptEscrow({
+        escrowId: agreement.expectedEscrowId,
+        freelancerAddress: terms.freelancer,
+        termsHash,
+        expectedAmountWei: terms.amountWei,
+        expectedDeadline: terms.deadline,
+      }), { onStatus: setAcceptTx })
+      await refreshChain()
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div>
-      <PageHeader
-        eyebrow="Escrow & payment"
-        title="Escrow และการจ่ายเงิน"
-        description={project.title}
-        backTo={`/client/projects/${project.id}`}
-        backLabel="กลับไปรายละเอียดโครงการ"
-        actions={<StatusBadge label={escrow?.label} tone={escrow?.tone} pulse={project.escrowStatus === 'funded'} />}
-      />
-
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-        <div className="space-y-4">
-          <section className="card overflow-hidden">
-            <div className="relative overflow-hidden bg-ink px-5 py-6 text-white">
-              <div className="surface-grid-dark absolute inset-0" aria-hidden="true" />
-              <div className="relative">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
-                  Escrow amount
-                </p>
-                <p className="mt-1 text-3xl font-extrabold tracking-tight">
-                  {formatCurrency(project.budget)}
-                </p>
-                <p className="mt-1 text-[11px] text-white/50">
-                  {funded
-                    ? `ฝากแล้ว ${formatCurrency(project.escrowAmount)} · ปล่อยแล้ว ${formatCurrency(project.releasedAmount)}`
-                    : 'ยังไม่มีการฝากเงินเข้า escrow สำหรับโครงการนี้'}
-                </p>
-                <div className="mt-4 flex flex-wrap gap-3 text-[10.5px] text-white/45">
-                  <span className="inline-flex items-center gap-1">
-                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                    คุ้มครองจนกว่าจะตรวจรับ
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <LockKeyhole className="h-3.5 w-3.5" />
-                    ต้องมี Wallet และ Contract
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5">
-              <h2 className="text-sm font-bold">ขั้นตอนการชำระเงิน</h2>
-              <ol className="mt-4 space-y-4">
-                {[
-                  {
-                    title: 'เชื่อมต่อ Wallet',
-                    description: wallet.isConnected
-                      ? `เชื่อมต่อแล้ว: ${shortAddress(wallet.address)} · Chain ${wallet.chainId}`
-                      : 'เชื่อม Wallet เพื่อยืนยันตัวตนและลงนามธุรกรรม',
-                    done: wallet.isConnected,
-                    icon: Wallet,
-                  },
-                  {
-                    title: 'ฝากเงินเข้า Escrow',
-                    description: funded
-                      ? 'โครงการนี้มีเงินอยู่ใน escrow แล้ว (ข้อมูลจำลอง)'
-                      : 'ฝากยอดโครงการ + ค่าธรรมเนียมผ่าน Smart Contract',
-                    done: funded,
-                    icon: CircleDollarSign,
-                  },
-                  {
-                    title: 'ตรวจรับและปล่อยเงิน',
-                    description: project.escrowStatus === 'released'
-                      ? 'ปล่อยเงินแล้วตามการอนุมัติครั้งก่อน'
-                      : 'ทำได้หลังตรวจรับงานและยืนยันจาก Wallet',
-                    done: project.escrowStatus === 'released',
-                    icon: CheckCircle2,
-                  },
-                ].map((step) => {
-                  const Icon = step.icon
-                  return (
-                    <li key={step.title} className="flex gap-3">
-                      <span
-                        className={cn(
-                          'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                          step.done ? 'bg-emerald-50 text-emerald-600' : 'bg-paper text-ink-400',
-                        )}
-                      >
-                        <Icon className="h-4 w-4" aria-hidden="true" />
-                      </span>
-                      <div>
-                        <p className="text-[12.5px] font-semibold text-ink">{step.title}</p>
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-ink-500">{step.description}</p>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ol>
-
-              <div className="mt-5 border-t border-ink/[0.06] pt-4">
-                <div className="flex items-center justify-between text-[11.5px] text-ink-500">
-                  <span>มูลค่างาน</span>
-                  <span>
-                    {formatCurrency(project.budget)}
-                    {chain?.amountWei ? ` · ${formatEth(chain.amountWei)}` : ''}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex items-center justify-between text-[11.5px] text-ink-500">
-                  <span>
-                    ค่าธรรมเนียมแพลตฟอร์ม (
-                    {chain?.policy ? `${chain.policy.feeBps / 100}%` : `${PLATFORM_FEE_RATE * 100}% · ประมาณการ`})
-                  </span>
-                  <span>
-                    {formatCurrency(fee)}
-                    {chain?.quote ? ` · ${formatEth(chain.quote.fee)}` : ''}
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between border-t border-ink/[0.06] pt-2 text-sm font-bold text-ink">
-                  <span>ยอดรวมที่ต้องฝาก</span>
-                  <span>
-                    {formatCurrency(total)}
-                    {chain?.quote ? ` · ${formatEth(chain.quote.total)}` : ''}
-                  </span>
-                </div>
-                <p className="mt-2 text-[10px] leading-relaxed text-ink-400">
-                  {contractConfig.thbPerEth
-                    ? `ฝากเป็น ETH ในอัตรา ${formatCurrency(contractConfig.thbPerEth)} ต่อ 1 ETH (อัตราคงที่จากการตั้งค่า ไม่ใช่ราคาตลาด) ยอดที่ตัดจริงคือยอดจาก Smart Contract ที่แสดงข้างบน`
-                    : 'ยังไม่ได้ตั้งอัตราแลกเปลี่ยนบาท/ETH จึงยังฝากไม่ได้'}
-                  {chainError ? ` · อ่านข้อมูลจาก Contract ไม่สำเร็จ: ${chainError.message}` : ''}
-                </p>
-              </div>
-
-              {!onChain && (
-                <div className="mt-4">
-                  <label htmlFor="freelancer-wallet" className="field-label">
-                    Wallet ของ freelancer (ที่รับเงิน)
-                  </label>
-                  <input
-                    id="freelancer-wallet"
-                    value={freelancerInput || project.freelancerWalletAddress || ''}
-                    onChange={(event) => setFreelancerInput(event.target.value)}
-                    placeholder="0x…"
-                    spellCheck={false}
-                    autoComplete="off"
-                    className={cn(
-                      'field-control font-mono text-[12px]',
-                      freelancerAddress && !freelancerAddressValid && 'field-error',
-                    )}
-                  />
-                  <p
-                    className={cn(
-                      'mt-1 text-[10.5px]',
-                      freelancerAddress && !freelancerAddressValid ? 'text-rose-600' : 'text-ink-400',
-                    )}
-                  >
-                    {freelancerAddress && !freelancerAddressValid
-                      ? 'address ไม่ถูกต้อง'
-                      : 'ตรวจให้แน่ใจว่าถูกต้อง เงินจะไปที่ address นี้เมื่อปล่อยเงิน (ระบบยังไม่ผูก wallet กับโปรไฟล์ freelancer)'}
-                  </p>
-                </div>
-              )}
-
-              {wallet.isWrongNetwork && (
-                <InfoBanner tone="danger" className="mt-4" title="Wallet อยู่คนละ Network">
-                  ต้องใช้ {contractConfig.chainName} (Chain {contractConfig.chainId}) จึงจะฝากหรือปล่อยเงินได้{' '}
-                  <button type="button" onClick={wallet.switchNetwork} className="font-semibold text-brand-700 underline">
-                    สลับ Network
-                  </button>
-                </InfoBanner>
-              )}
-
-              {onChain && (
-                <InfoBanner tone="info" className="mt-4" title={`สถานะบน blockchain: ${onChain.statusName}`}>
-                  escrow ของ wallet {shortAddress(wallet.address)} สำหรับโครงการนี้ ฝากไว้ {formatEth(onChain.amount)} + ค่าธรรมเนียม{' '}
-                  {formatEth(onChain.fee)} · ผู้รับ {shortAddress(onChain.freelancer)} · ขอแก้งานแล้ว {onChain.revisionCount} ครั้ง
-                  <br />
-                  ข้อมูลของโครงการในหน้านี้ยังเป็นข้อมูลจำลอง จึงอาจยังแสดงว่ายังไม่ฝากเงิน
-                </InfoBanner>
-              )}
-
-              <div className="mt-4 space-y-2">
-                <div className="flex flex-wrap gap-2">
-                  <WalletConnectButton size="md" />
-                  <Button
-                    variant="brand"
-                    size="md"
-                    icon={ArrowRight}
-                    onClick={handleDeposit}
-                    loading={busy}
-                  >
-                    ฝากเงินเข้า Escrow
-                  </Button>
-                  {canRelease && (
-                    <Button variant="secondary" size="md" onClick={handleRelease} loading={busy}>
-                      ปล่อยเงินให้ freelancer
-                    </Button>
-                  )}
-                </div>
-                <p className="text-[10px] text-ink-400">
-                  ปุ่มเหล่านี้จะไม่รายงานความสำเร็จหากยังไม่ได้รับข้อมูล Contract จริง
-                </p>
-              </div>
-
-              <TransactionStatus
-                status={tx.status}
-                hash={tx.hash}
-                error={tx.error}
-                className="mt-3"
-              />
-            </div>
-          </section>
-
-          <section className="card p-5">
-            <h2 className="text-sm font-bold">ธุรกรรมของโครงการนี้</h2>
-            {projectTransactions.length === 0 ? (
-              <p className="mt-3 rounded-xl bg-paper px-4 py-4 text-center text-[11.5px] text-ink-500">
-                ยังไม่มีธุรกรรมที่บันทึกไว้
-              </p>
-            ) : (
-              <ul className="mt-3 divide-y divide-ink/[0.06]">
-                {projectTransactions.map((transaction) => (
-                  <li key={transaction.id} className="flex items-center justify-between gap-3 py-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-[12px] font-medium text-ink">{transaction.note}</p>
-                      <p className="mt-0.5 text-[10px] text-ink-400">
-                        {formatDate(transaction.createdAt)} · {transaction.isMock ? 'ข้อมูลจำลอง' : 'บน blockchain'}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[12px] font-bold text-ink">{formatCurrency(transaction.amount)}</p>
-                      <p className="text-[10px] text-ink-400">{transaction.status}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
-
-        <aside className="space-y-4 lg:sticky lg:top-[88px] lg:self-start">
-          <div className="card p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold">สถานะ Contract</h2>
-              <span
-                className={cn(
-                  'rounded-full px-2 py-0.5 text-[9px] font-bold',
-                  configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700',
-                )}
-              >
-                {configured ? 'CONFIGURED' : 'NOT CONFIGURED'}
-              </span>
-            </div>
-
-            <ul className="mt-3 space-y-2">
-              {[
-                { label: 'Contract Address', ready: Boolean(contractConfig.contractAddress), value: contractConfig.contractAddress },
-                { label: 'Chain ID', ready: Boolean(contractConfig.chainId), value: contractConfig.chainId },
-                { label: 'ABI', ready: Array.isArray(contractConfig.abi) && contractConfig.abi.length > 0, value: null },
-                { label: 'Escrow currency', ready: Boolean(contractConfig.currency.type), value: contractConfig.currency.symbol },
-                { label: 'Function names', ready: Boolean(contractConfig.methods.depositEscrow), value: null },
-              ].map((item) => (
-                <li key={item.label} className="flex items-center justify-between gap-2 text-[11px]">
-                  <span className="text-ink-500">{item.label}</span>
-                  {item.ready ? (
-                    <span className="max-w-[150px] truncate font-mono text-[10px] text-emerald-600">
-                      {item.value || 'พร้อม'}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 font-semibold text-amber-600">
-                      <Clock3 className="h-3 w-3" /> รอข้อมูล
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-
-            {missing.length > 0 && (
-              <InfoBanner tone="danger" className="mt-3" title="ยังไม่พร้อมทำธุรกรรม">
-                ขาด: {missing.join(' · ')}
-              </InfoBanner>
-            )}
+    <>
+      <EscrowTerms agreement={agreement} terms={terms} />
+      <section className="card space-y-4 p-5">
+        <h2 className="text-sm font-bold">{statusLabel}</h2>
+        {!matchingHash && <InfoBanner tone="danger">ไม่สามารถตรวจ hash ของข้อตกลงได้</InfoBanner>}
+        {!sameDeployment && <InfoBanner tone="warning">เครือข่ายหรือ Contract Address ของเว็บต่างจากข้อตกลงนี้</InfoBanner>}
+        {message && <InfoBanner tone="warning">{message}</InfoBanner>}
+        {chainError && <InfoBanner tone="warning">{chainError.message} <Button onClick={refreshChain} variant="ghost" size="sm">อ่านอีกครั้ง</Button></InfoBanner>}
+        {sameDeployment && <WalletConnectButton />}
+        {chainReady && !chainError && <Button onClick={refreshChain} variant="ghost" size="sm">อ่านสถานะจากเครือข่าย</Button>}
+        {isClient && chainReady && !signerReady && <InfoBanner tone="warning">เลือก Wallet คนจ้างที่ระบุในข้อตกลงก่อนเซ็นธุรกรรม</InfoBanner>}
+        {awaitingAcceptance && isClient && <InfoBanner>รอฟรีแลนซ์รับงานบน Sepolia ก่อนจึงจะปล่อยเงินได้</InfoBanner>}
+        {awaitingAcceptance && !isClient && !freelancerSignerReady && (
+          <InfoBanner tone="warning">เลือก Wallet ฟรีแลนซ์ที่ระบุในข้อตกลงเพื่อรับงานบน Sepolia</InfoBanner>
+        )}
+        {awaitingAcceptance && !isClient && freelancerSignerReady && acceptanceDeadlinePassed && (
+          <InfoBanner tone="warning">ข้อตกลงเลยกำหนดส่งแล้ว จึงรับงานบน Sepolia ไม่ได้</InfoBanner>
+        )}
+        {onChain && !chainTermsMatch && <InfoBanner tone="danger">ข้อมูลบนเครือข่ายไม่ตรงกับข้อตกลง</InfoBanner>}
+        {onChain && chainTermsMatch && (
+          <p className="text-sm text-ink-600">ยอดฝากรวม {formatEther(onChain.amount + onChain.fee)} ETH · ค่าจ้าง {formatEther(onChain.amount)} ETH · ค่าธรรมเนียม {formatEther(onChain.fee)} ETH{onChain.deadline !== terms.deadline && ' · กำหนดส่งบนเครือข่ายเปลี่ยนจากต้นฉบับ'}</p>
+        )}
+        {deposit?.feeWei && !onChain && <p className="text-sm text-ink-600">ค่าธรรมเนียมที่ยืนยันแล้ว {formatEther(deposit.feeWei)} ETH</p>}
+        {isClient && canDeposit && (
+          <div className="space-y-3">
+            <p className="text-sm">ยอดฝากรวม {formatEther(chain.quote.total)} ETH · ค่าธรรมเนียม {formatEther(chain.quote.fee)} ETH</p>
+            <label className="flex items-start gap-2 text-sm text-ink-600">
+              <input className="mt-1" type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />
+              <span>ฉันยืนยันข้อตกลงงวดนี้และยอมรับเงื่อนไขการใช้งานฉบับ {terms.tosVersion}<br />{tosText}</span>
+            </label>
+            <Button variant="brand" loading={busy} disabled={!accepted} onClick={() => send(true)}>ฝากเงินผ่าน MetaMask</Button>
           </div>
-
-          <div className="card p-5">
-            <div className="flex items-center gap-2 text-[12px] font-bold text-ink">
-              <Info className="h-4 w-4 text-brand-600" />
-              สิ่งที่จะเกิดขึ้นจริง
-            </div>
-            <ul className="mt-2.5 space-y-2 text-[11px] leading-relaxed text-ink-500">
-              <li>• กด “ฝากเงิน” แล้วระบบจะขอเชื่อม Wallet (ถ้ายังไม่เชื่อม)</li>
-              <li>• หาก Contract ยังไม่ตั้งค่า ระบบจะแจ้งสิ่งที่ขาดและไม่ทำธุรกรรม</li>
-              <li>• เมื่อเชื่อมต่อแล้ว จะแสดง pending → confirmed จาก blockchain จริง</li>
-              <li>• transaction hash จะแสดงเฉพาะเมื่อได้รับจาก network</li>
-            </ul>
-            {getExplorerAddressUrl(contractConfig.contractAddress) && (
-              <a
-                href={getExplorerAddressUrl(contractConfig.contractAddress)}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-flex items-center gap-1 text-[10.5px] font-semibold text-brand-700 hover:underline"
-              >
-                ดู Smart Contract บน Block Explorer
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            )}
-          </div>
-
-          <InfoBanner tone="warning" title="Mock data">
-            ยอดเงินและประวัติธุรกรรมในหน้านี้เป็นข้อมูลจำลอง การฝาก/ปล่อยเงินจริงจะเกิดขึ้นเมื่อเชื่อม
-            contract เท่านั้น
+        )}
+        {showReleaseProgress && (
+          <InfoBanner title={workApproved ? 'อนุมัติงานแล้ว' : 'สถานะการปล่อยเงิน'}>
+            <ReviewPaymentStatus projectId={projectId} milestoneNumber={agreement.milestoneNumber} showEscrowLink={false} />
           </InfoBanner>
-        </aside>
-      </div>
-    </div>
+        )}
+        {isClient && canRelease && chainTermsMatch && !waitingForOwnTransaction && <Button loading={busy} onClick={() => send(false)}>ปล่อยเงินงวดนี้</Button>}
+        {canAccept && (
+          <div className="space-y-2">
+            <p className="text-sm text-ink-600">ยืนยันรับข้อตกลงงวดนี้บน Sepolia เพื่อให้ผู้จ้างปล่อยเงินได้</p>
+            <Button variant="brand" loading={busy} onClick={acceptWork}>รับงานบน Sepolia</Button>
+          </div>
+        )}
+        {!isClient && agreement.status === 'funded' && ['active', 'submitted'].includes(onChain?.statusName) && (
+          <InfoBanner>รับงานบน Sepolia แล้ว ผู้จ้างสามารถปล่อยเงินจากหน้าข้อตกลงได้</InfoBanner>
+        )}
+        {acceptTx && <TransactionStatus {...acceptTx} />}
+        {!showReleaseProgress && (pending.length > 0 || releaseAwaitingSync) && (
+          <InfoBanner>{releaseAwaitingSync
+            ? 'สัญญาบน Sepolia แสดงว่าปล่อยเงินแล้ว ประวัติรายได้จะอัปเดตเมื่อระบบตรวจยืนยันธุรกรรมจากบล็อก finalized'
+            : 'ระบบจะอัปเดตสถานะเมื่อตรวจพบธุรกรรมที่ตรงกับข้อตกลงในบล็อกที่ Sepolia ยืนยันขั้นสุดท้าย (finalized) แล้ว'}
+          </InfoBanner>
+        )}
+        <div role="status" className={checkedTransaction ? undefined : 'sr-only'}>
+          {checkedTransaction && (
+            <InfoBanner tone={checkedTransaction.status === 'rejected' ? 'warning' : 'info'}>
+              {checkedTransaction.status === 'pending' && 'ตรวจเลขนี้แล้ว · ระบบยังรอผลตรวจสอบจาก Sepolia'}
+              {checkedTransaction.status === 'confirmed' && (txMessages[checkedTransaction.event] || 'ยืนยันธุรกรรมแล้ว')}
+              {checkedTransaction.status === 'rejected' && (txErrors[checkedTransaction.error] || 'ตรวจสอบธุรกรรมไม่ผ่าน')}
+            </InfoBanner>
+          )}
+        </div>
+        {agreement.transactions.length > 0 && (
+          <ul className="space-y-2 text-xs text-ink-600">
+            {agreement.transactions.map((tx) => (
+              <li key={tx.txHash} className="break-all">
+                {getExplorerTxUrl(tx.txHash) ? <a className="underline" href={getExplorerTxUrl(tx.txHash)} target="_blank" rel="noreferrer">{tx.txHash}</a> : tx.txHash}
+                <span className="ml-2">{txErrors[tx.error] || (tx.status === 'pending' ? 'รอยืนยัน' : txMessages[tx.event] || 'ตรวจสอบไม่ผ่าน')}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {['prepared', 'funded'].includes(agreement.status) && (
+          <details className="text-sm">
+            <summary className="cursor-pointer">ตรวจจากเลขธุรกรรม</summary>
+            <form className="mt-2 flex flex-wrap gap-2" onSubmit={record}>
+              <input className="min-w-56 flex-1 rounded-lg border border-ink/10 px-3" aria-label="เลขธุรกรรม" placeholder="0x…" required
+                pattern="0x[0-9a-fA-F]{64}" value={hash} onChange={(event) => setHash(event.target.value)} />
+              <Button size="sm" type="submit" variant="secondary" loading={busy}>ตรวจธุรกรรม</Button>
+            </form>
+          </details>
+        )}
+      </section>
+    </>
+  )
+}
+
+function LegacyEscrow({ projectId, clientAddress }) {
+  const escrowId = contract.getEscrowId({ projectId, clientAddress })
+  const { data, refresh } = useAsync(() => contract.readEscrow({ escrowId }), [escrowId])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  if (!data) return null
+
+  async function release() {
+    setBusy(true)
+    try {
+      const tx = await contract.releasePayment({ escrowId, clientAddress })
+      setMessage(`ส่งธุรกรรมแล้ว ${tx.hash}`)
+      await tx.wait()
+      refresh()
+    } catch (err) {
+      setMessage(normalizeWalletError(err).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <InfoBanner tone="warning" title="พบ Escrow จากขั้นตอนฝากเดิม">
+      <p>รายการเดิมยังใช้รหัส {escrowId} และยอด {formatEther(data.amount)} ETH</p>
+      {['active', 'submitted'].includes(data.statusName) && <Button size="sm" variant="secondary" loading={busy} onClick={release}>ปล่อยเงินรายการเดิม</Button>}
+      {message && <p className="break-all">{message}</p>}
+    </InfoBanner>
   )
 }

@@ -6,6 +6,7 @@ import { Logo } from './Logo'
 import { Button } from '@/components/common/Button'
 import { UserMenu } from './UserMenu'
 import { useAuth } from '@/contexts/AuthContext'
+import { dashboardForRole } from '@/services/auth/authService'
 import { publicNav } from '@/constants'
 import { cn } from '@/utils/cn'
 
@@ -26,7 +27,9 @@ export function Navbar() {
     setOpen(false)
   }, [location.pathname])
 
-  const dashboardPath = user?.role === 'client' ? '/client/dashboard' : '/freelancer/dashboard'
+  const isAdmin = user?.role === 'admin'
+  const dashboardPath = dashboardForRole(user?.role)
+  const dashboardLabel = isAdmin ? 'จัดการระบบ' : 'แดชบอร์ด'
 
   return (
     <header
@@ -63,8 +66,8 @@ export function Navbar() {
         <div className="flex items-center gap-2">
           {isAuthenticated ? (
             <>
-              <Button to={dashboardPath} variant="secondary" size="sm" className="hidden sm:inline-flex">
-                แดชบอร์ด
+              <Button to={dashboardPath} variant="secondary" size="sm" className={isAdmin ? 'whitespace-nowrap' : 'hidden sm:inline-flex'}>
+                {dashboardLabel}
               </Button>
               <UserMenu />
             </>
@@ -120,7 +123,7 @@ export function Navbar() {
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {isAuthenticated ? (
                   <Button to={dashboardPath} variant="primary" size="md" className="col-span-2">
-                    ไปที่แดชบอร์ด
+                    {dashboardLabel}
                   </Button>
                 ) : (
                   <>

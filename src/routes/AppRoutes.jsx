@@ -15,6 +15,7 @@ const HowItWorks = lazy(() => import('@/pages/public/HowItWorks'))
 const NotFound = lazy(() => import('@/pages/public/NotFound'))
 const Login = lazy(() => import('@/pages/auth/Login'))
 const Register = lazy(() => import('@/pages/auth/Register'))
+const AdminLogin = lazy(() => import('@/pages/auth/AdminLogin'))
 
 const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard'))
 const CreateJob = lazy(() => import('@/pages/client/CreateJob'))
@@ -43,6 +44,8 @@ const WalletPage = lazy(() => import('@/pages/shared/WalletPage'))
 const TransactionDetails = lazy(() => import('@/pages/shared/TransactionDetails'))
 const Settings = lazy(() => import('@/pages/shared/Settings'))
 const HelpPage = lazy(() => import('@/pages/shared/HelpPage'))
+const SupportTickets = lazy(() => import('@/pages/shared/SupportTickets'))
+const SupportTicket = lazy(() => import('@/pages/shared/SupportTicket'))
 const AdminConsole = lazy(() => import('@/pages/admin/AdminConsole'))
 
 const withSuspense = (element) => <Suspense fallback={<PageLoader />}>{element}</Suspense>
@@ -64,6 +67,7 @@ export function AppRoutes() {
       <Route element={<AuthLayout />}>
         <Route path="login" element={withSuspense(<Login />)} />
         <Route path="register" element={withSuspense(<Register />)} />
+        <Route path="admin/login" element={withSuspense(<AdminLogin />)} />
       </Route>
 
       <Route element={<ProtectedRoute role="client" />}>
@@ -95,6 +99,7 @@ export function AppRoutes() {
           />
           <Route path="freelancer/projects" element={withSuspense(<ActiveProjects />)} />
           <Route path="freelancer/projects/:projectId" element={withSuspense(<ProjectDetails />)} />
+          <Route path="freelancer/projects/:projectId/escrow" element={withSuspense(<EscrowPayment />)} />
           <Route
             path="freelancer/projects/:projectId/submit"
             element={withSuspense(<SubmitWork />)}
@@ -109,12 +114,20 @@ export function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
           <Route path="notifications" element={withSuspense(<Notifications />)} />
+          <Route path="support/tickets" element={withSuspense(<SupportTickets />)} />
+          <Route path="support/tickets/:reportId" element={withSuspense(<SupportTicket />)} />
           <Route path="messages" element={withSuspense(<Messages />)} />
           <Route path="messages/:threadId" element={withSuspense(<Messages />)} />
           <Route path="wallet" element={withSuspense(<WalletPage />)} />
           <Route path="transactions/:transactionId" element={withSuspense(<TransactionDetails />)} />
           <Route path="settings" element={withSuspense(<Settings />)} />
+        </Route>
+      </Route>
+
+      <Route element={<ProtectedRoute role="admin" />}>
+        <Route element={<DashboardLayout />}>
           <Route path="admin" element={withSuspense(<AdminConsole />)} />
+          <Route path="admin/reports/:reportId" element={withSuspense(<SupportTicket admin />)} />
           <Route path="admin/:section" element={withSuspense(<AdminConsole />)} />
         </Route>
       </Route>

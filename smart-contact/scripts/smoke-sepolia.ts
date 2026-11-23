@@ -179,7 +179,7 @@ async function toSubmitted(label: string) {
     "client ฝากเงิน",
   );
   check((await getEscrow(id)).status === Status.Funded, "สถานะ Funded");
-  await send(() => freelancerC.write.acceptEscrow([id, termsHash]), "freelancer รับงาน");
+  await send(() => freelancerC.write.acceptEscrow([id, termsHash, AMOUNT, deadline]), "freelancer รับงาน");
   check((await getEscrow(id)).status === Status.Active, "สถานะ Active");
   await send(() => freelancerC.write.submitWork([id, keccak256(toHex(`work-1-${label}-${unique}`))]), "freelancer ส่งงาน");
   check((await getEscrow(id)).status === Status.Submitted, "สถานะ Submitted");

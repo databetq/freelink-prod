@@ -21,10 +21,6 @@ const CHAIN_NAMES = {
 
 const chainId = env.VITE_CHAIN_ID ? Number(env.VITE_CHAIN_ID) : null
 
-// THB per 1 ETH. Product decision pending (BACKEND_START_ver_0_2.md, section 4.5):
-// a fixed rate from .env is the interim approach. Never convert with floats — see thbToWei().
-const thbPerEth = env.VITE_THB_PER_ETH ? Number(env.VITE_THB_PER_ETH) : null
-
 export const contractConfig = {
   chainId,
   chainName: env.VITE_CHAIN_NAME || (chainId ? CHAIN_NAMES[chainId] || `Chain ${chainId}` : null),
@@ -40,8 +36,6 @@ export const contractConfig = {
     address: null,
     decimals: 18,
   },
-
-  thbPerEth: Number.isFinite(thbPerEth) && thbPerEth > 0 ? thbPerEth : null,
 
   // Keys are what the UI calls, values are the Solidity function names.
   methods: {
@@ -79,6 +73,5 @@ export function getMissingContractConfig() {
   if (!contractConfig.contractAddress) missing.push('Contract Address (VITE_CONTRACT_ADDRESS)')
   if (!contractConfig.chainId) missing.push('Network / Chain ID (VITE_CHAIN_ID)')
   if (!Array.isArray(contractConfig.abi) || contractConfig.abi.length === 0) missing.push('Contract ABI')
-  if (!contractConfig.thbPerEth) missing.push('อัตราแลกเปลี่ยน บาท/ETH (VITE_THB_PER_ETH)')
   return missing
 }

@@ -68,7 +68,7 @@ export default function ManageJobs() {
         toast.success('ปิดรับข้อเสนอแล้ว', confirm.job.title)
       } else {
         await jobService.deleteJob(confirm.job.id)
-        toast.success('ลบประกาศงานแล้ว', 'การลบนี้เกิดขึ้นกับข้อมูลจำลองในเครื่อง')
+        toast.success('ลบประกาศงานแล้ว', 'ประกาศถูกลบออกจากระบบแล้ว')
       }
       setConfirm(null)
       await refresh()
@@ -92,10 +92,6 @@ export default function ManageJobs() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="Mock workflow">
-        การแก้ไข ลบ และปิดรับจะอัปเดตข้อมูลจำลองในเบราว์เซอร์ของคุณทันที
-        — รีเซ็ตได้ที่หน้าตั้งค่า
-      </InfoBanner>
 
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs
@@ -153,7 +149,9 @@ export default function ManageJobs() {
 
           <ul className="divide-y divide-ink/[0.06]">
             {filtered.map((job) => {
-              const status = jobStatus[job.status]
+              const status = job.projectCompleted
+                ? job.projectPaid ? { label: 'โครงการเสร็จสิ้น', tone: 'emerald' } : { label: 'งานเสร็จ · รอจ่ายเงิน', tone: 'amber' }
+                : jobStatus[job.status]
               return (
                 <li
                   key={job.id}
@@ -250,7 +248,7 @@ export default function ManageJobs() {
         description={
           confirm?.action === 'close'
             ? `ประกาศ “${confirm?.job.title}” จะไม่รับข้อเสนอใหม่ แต่ผู้สมัครเดิมยังดูได้`
-            : `ประกาศ “${confirm?.job.title}” และข้อเสนอที่เกี่ยวข้องจะถูกลบจากข้อมูลจำลอง — ไม่สามารถย้อนกลับได้`
+            : `ประกาศ “${confirm?.job.title}” และข้อเสนอที่เกี่ยวข้องจะถูกลบออกจากระบบและไม่สามารถย้อนกลับได้`
         }
         confirmLabel={confirm?.action === 'close' ? 'ปิดรับข้อเสนอ' : 'ลบประกาศ'}
         tone={confirm?.action === 'close' ? 'secondary' : 'danger'}

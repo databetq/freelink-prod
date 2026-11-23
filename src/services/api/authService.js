@@ -1,36 +1,42 @@
 import { appConfig } from '@/config/appConfig'
-import { ApiNotConfiguredError, apiClient, assertApiConfigured } from './apiClient'
+import { advanceSessionVersion, apiClient, assertApiConfigured } from './apiClient'
 import { endpoints } from './endpoints'
 
-/**
- * Raw HTTP adapter for authentication.
- *
- * ⚠️ The paths come from the DRAFT endpoint map and are NOT confirmed by the
- * backend team. The UI never calls these while VITE_USE_MOCK_API=true.
- */
+async function startSession(path, credentials) {
+  assertApiConfigured()
+  await apiClient.post(path, credentials)
+  advanceSessionVersion()
+  return authApi.fetchCurrentUser()
+}
+
 export const authApi = {
-  async fetchCurrentUser(token) {
+  signInAdmin: (username, password) => startSession('/auth/admin/login', { username, password }),
+  signInPassword: (email, password) => startSession('/auth/login', { email, password }),
+  registerPassword: (account) => startSession('/auth/register', account),
+
+  async fetchCurrentUser({ signal } = {}) {
     assertApiConfigured()
-    const { data } = await apiClient.get(endpoints.auth.me, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    })
+    const { data } = await apiClient.get(endpoints.auth.me, { signal })
     return data
   },
 
   async signOut() {
     assertApiConfigured()
     await apiClient.post(endpoints.auth.logout)
-    return true
+    advanceSessionVersion()
   },
 
-  /**
-   * Returns the URL that should be used for the real Google OAuth redirect once
-   * the backend exposes a callback. TODO(auth): confirm the callback contract.
-   */
+  async listWarnings() {
+    assertApiConfigured()
+    const { data } = await apiClient.get('/auth/warnings')
+    return data
+  },
+
   getGoogleAuthUrl(role) {
-    if (!appConfig.apiBaseUrl) throw new ApiNotConfiguredError()
-    const url = new URL(endpoints.auth.google, appConfig.apiBaseUrl)
-    url.searchParams.set('role', role)
+    assertApiConfigured()
+    const base = appConfig.apiBaseUrl.replace(/\/+$/, '')
+    const url = new URL(`${base}${endpoints.auth.google}`, window.location.origin)
+    if (role) url.searchParams.set('role', role)
     return url.toString()
   },
 }

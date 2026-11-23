@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   CheckCircle2,
@@ -10,13 +10,17 @@ import {
   MessageSquare,
   Send,
   ShieldCheck,
+  Star,
   Wallet,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAsync } from '@/hooks/useAsync'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { escrowService } from '@/services/api/escrowService'
+import { jobService } from '@/services/api/jobService'
 import { projectService } from '@/services/api/projectService'
 import { transactionService } from '@/services/api/transactionService'
+import { getExplorerTxUrl } from '@/services/blockchain/transactionService'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/common/Button'
 import { Avatar } from '@/components/common/Avatar'
@@ -27,6 +31,10 @@ import { InfoBanner } from '@/components/common/InfoBanner'
 import { ErrorState } from '@/components/common/ErrorState'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PageLoader } from '@/components/common/LoadingSkeleton'
+import { WorkAttachments } from '@/components/projects/WorkAttachments'
+import { WorkLinks } from '@/components/projects/WorkLinks'
+import { FreelancerReviewDialog } from '@/components/projects/FreelancerReviewDialog'
+import { REVIEW_PAYMENT_POLL_MS, ReviewPaymentStatus } from '@/components/projects/ReviewPaymentStatus'
 import { escrowStatus, projectStatus, transactionTypes } from '@/constants'
 import { formatCurrency, formatDate, timeAgo, truncate } from '@/utils/format'
 import { cn } from '@/utils/cn'
@@ -40,18 +48,54 @@ const milestoneIcon = {
 export default function ProjectDetails() {
   const { projectId } = useParams()
   const { user, role, profileId } = useAuth()
-  const { data: project, loading, error, refresh } = useAsync(
+  const { data: project, loading, error, refresh, setData: setProject } = useAsync(
     () => projectService.getProject(projectId),
     [projectId],
   )
   useDocumentTitle(project ? project.title : 'รายละเอียดโครงการ')
 
   const { data: transactions } = useAsync(
-    () => transactionService.list(user?.id),
-    [user?.id],
+    () => project && user?.id ? transactionService.list(user.id) : [],
+    [user?.id, project?.escrowStatus],
   )
 
+  const { data: escrowDetails } = useAsync(async () => {
+    if (project?.id !== projectId) return null
+    return { projectId, ...(await escrowService.get(projectId)) }
+  }, [projectId, project?.id, project?.escrowStatus])
+
+  const jobId = project?.id === projectId ? project.jobId : null
+  const { data: loadedJob, loading: jobLoading, error: jobError, refresh: refreshJob } = useAsync(
+    () => jobId ? jobService.getJob(jobId) : null,
+    [jobId],
+  )
+  const job = loadedJob?.id === jobId ? loadedJob : null
+
+  const fundedMilestone = project?.milestones?.find((item) => item.status === 'in_progress')
+  const awaitingPayout = project?.escrowStatus === 'funded' && (project.status === 'completed'
+    || project.submissions?.some((item) => item.status === 'approved' && item.milestoneNumber === fundedMilestone?.id))
+  const waitingForEscrow = project?.id === projectId
+    && (['unfunded', 'pending_verification'].includes(project.escrowStatus)
+      || awaitingPayout)
+  useEffect(() => {
+    if (!waitingForEscrow) return undefined
+    let active = true
+    let timer
+    async function poll() {
+      try {
+        const updated = await projectService.getProject(projectId)
+        if (active) setProject(updated)
+      } catch {
+        // Keep the last known status if the API is temporarily unreachable.
+      }
+      if (active) timer = setTimeout(poll, REVIEW_PAYMENT_POLL_MS)
+    }
+    timer = setTimeout(poll, REVIEW_PAYMENT_POLL_MS)
+    return () => { active = false; clearTimeout(timer) }
+  }, [projectId, waitingForEscrow, setProject])
+
   const [tab, setTab] = useState('milestones')
+  const [reviewProjectId, setReviewProjectId] = useState(null)
 
   const projectTx = useMemo(
     () => (transactions || []).filter((transaction) => transaction.projectId === projectId),
@@ -83,7 +127,24 @@ export default function ProjectDetails() {
   const escrow = escrowStatus[project.escrowStatus]
   const counterpart = role === 'client' ? project.freelancer : project.client
   const isClient = role === 'client'
-  const funded = project.escrowStatus !== 'unfunded'
+  const funded = project.escrowStatus === 'funded'
+  const latestDeposit = escrowDetails?.projectId === projectId
+    ? escrowDetails.agreements.flatMap((agreement) => agreement.transactions)
+      .findLast((tx) => tx.status === 'confirmed' && tx.event === 'EscrowFunded')
+    : null
+  const depositUrl = getExplorerTxUrl(latestDeposit?.txHash)
+  const agreements = escrowDetails?.projectId === projectId ? escrowDetails.agreements : []
+  const latestAgreementByMilestone = new Map(agreements.map((item) => [item.milestoneNumber, item.id]))
+  const approvedAgreements = new Set(project.submissions?.filter((item) => item.status === 'approved')
+    .map((item) => item.agreementId))
+  const milestones = (project.milestones || []).map((item) => ({
+    ...item,
+    done: project.status === 'completed' || item.status === 'completed'
+      || approvedAgreements.has(latestAgreementByMilestone.get(item.id)),
+  }))
+  const completedMilestones = milestones.filter((item) => item.done).length
+  const progress = project.status === 'completed' ? 100
+    : milestones.length ? Math.round(100 * completedMilestones / milestones.length) : 0
   const latestSubmission = project.submissions?.[0]
 
   return (
@@ -102,11 +163,16 @@ export default function ProjectDetails() {
         }
       />
 
-      {!funded && (
+      {project.escrowStatus === 'unfunded' && (
         <InfoBanner tone="warning" className="mb-5" title="Escrow ยังไม่ถูกฝากเงิน">
           {isClient
-            ? 'คุณต้องฝากเงินเข้า escrow ก่อนที่ฟรีแลนซ์จะเริ่มงาน — การฝากจริงต้องรอเชื่อมต่อ Smart Contract'
+            ? 'เตรียมข้อตกลงและยืนยันการฝากเงินก่อนเริ่มงานในงวดนี้'
             : 'รอลูกค้าฝากเงินเข้า escrow ก่อนเริ่มงาน — คุณสามารถดูรายละเอียดและคุยกับลูกค้าได้ระหว่างนี้'}
+        </InfoBanner>
+      )}
+      {project.escrowStatus === 'pending_verification' && (
+        <InfoBanner className="mb-5" title="กำลังยืนยันเงินฝากเข้า Escrow">
+          ระบบได้รับเลขธุรกรรมแล้วและกำลังตรวจสอบกับ Sepolia หน้านี้จะอัปเดตอัตโนมัติเมื่อยืนยันสำเร็จ
         </InfoBanner>
       )}
 
@@ -116,22 +182,22 @@ export default function ProjectDetails() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">
-                  Overall progress
+                  ความคืบหน้าของงาน
                 </p>
-                <p className="mt-1 text-2xl font-extrabold text-ink">{project.progress}%</p>
+                <p className="mt-1 text-2xl font-extrabold text-ink">{progress}%</p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] text-ink-400">มูลค่าโครงการ</p>
                 <p className="text-sm font-bold text-ink">{formatCurrency(project.budget)}</p>
               </div>
             </div>
-            <ProgressBar value={project.progress} className="mt-3" />
+            <ProgressBar value={progress} className="mt-3" />
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
-                { label: 'Milestones', value: project.milestones?.length || 0 },
+                  { label: 'Milestones', value: milestones.length },
                 {
                   label: 'เสร็จแล้ว',
-                  value: (project.milestones || []).filter((item) => item.status === 'completed').length,
+                    value: completedMilestones,
                 },
                 { label: 'การส่งงาน', value: project.submissions?.length || 0 },
                 { label: 'ธุรกรรม', value: projectTx.length },
@@ -170,10 +236,15 @@ export default function ProjectDetails() {
             <section className="card p-5">
               <h2 className="text-sm font-bold">Milestones</h2>
               <ol className="mt-4 space-y-0">
-                {(project.milestones || []).map((milestone, index) => {
-                  const Icon = milestoneIcon[milestone.status] || Circle
-                  const done = milestone.status === 'completed'
+                {milestones.map((milestone, index) => {
+                  const done = milestone.done
+                  const Icon = milestoneIcon[done ? 'completed' : milestone.status] || Circle
                   const active = milestone.status === 'in_progress'
+                  const readyToPrepare = project.status !== 'cancelled' && milestones[index - 1]?.status === 'completed'
+                    && !latestAgreementByMilestone.has(milestone.id) && milestone.status === 'pending'
+                  const statusLabel = milestone.status === 'completed' ? 'ยืนยันการจ่ายแล้ว'
+                    : done ? (active ? 'อนุมัติงานแล้ว · รอจ่าย' : 'อนุมัติงานแล้ว')
+                      : active ? 'กำลังทำ' : readyToPrepare ? 'พร้อมเตรียมข้อตกลง' : 'รอดำเนินการ'
                   return (
                     <li key={milestone.id} className="relative flex gap-3 pb-6 last:pb-0">
                       {index < project.milestones.length - 1 && (
@@ -201,7 +272,7 @@ export default function ProjectDetails() {
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[10.5px] text-ink-400">
                           <span>กำหนด {formatDate(milestone.dueDate)}</span>
                           <StatusBadge
-                            label={done ? 'เสร็จแล้ว' : active ? 'กำลังทำ' : 'รอดำเนินการ'}
+                            label={statusLabel}
                             tone={done ? 'emerald' : active ? 'amber' : 'slate'}
                           />
                         </div>
@@ -225,7 +296,7 @@ export default function ProjectDetails() {
               </div>
               {(project.submissions || []).length === 0 ? (
                 <p className="mt-3 rounded-xl bg-paper px-4 py-6 text-center text-[12px] text-ink-500">
-                  ยังไม่มีการส่งงาน — {isClient ? 'รอฟรีแลนซ์ส่งมอบงาน' : 'คุณสามารถส่งงานได้จากปุ่มด้านขวา'}
+                  ยังไม่มีการส่งงาน
                 </p>
               ) : (
                 <ul className="mt-3 space-y-3">
@@ -254,20 +325,11 @@ export default function ProjectDetails() {
                         />
                       </div>
                       <p className="mt-2 text-[11.5px] leading-relaxed text-ink-600">{submission.description}</p>
-                      {submission.link && (
-                        <a
-                          href={submission.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 hover:underline"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          เปิดลิงก์งาน
-                        </a>
-                      )}
+                      <WorkLinks submission={submission} />
+                      <WorkAttachments projectId={project.id} files={submission.files} />
                       {submission.feedback && (
                         <p className="mt-2 rounded-lg bg-white px-3 py-2 text-[10.5px] leading-relaxed text-ink-500">
-                          <span className="font-semibold text-ink">Feedback:</span> {submission.feedback}
+                          <span className="font-semibold text-ink">Feedback:</span> <span className="whitespace-pre-wrap break-words">{submission.feedback}</span>
                         </p>
                       )}
                     </li>
@@ -294,7 +356,7 @@ export default function ProjectDetails() {
                         </p>
                         <p className="mt-0.5 truncate text-[10px] text-ink-400">{transaction.note}</p>
                         <p className="mt-0.5 text-[9.5px] text-ink-300">
-                          {formatDate(transaction.createdAt)} · {transaction.isMock ? 'mock ledger' : 'on-chain'}
+                          {formatDate(transaction.createdAt)} · {transaction.hash ? 'on-chain' : 'รอยืนยัน'}
                         </p>
                       </div>
                       <div className="text-right">
@@ -317,7 +379,7 @@ export default function ProjectDetails() {
             <section className="card p-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold">โจทย์งาน</h2>
-                {project.job && (
+                {job && (
                   <Link
                     to={`/jobs/${project.jobId}`}
                     className="text-[11px] font-semibold text-brand-700 hover:underline"
@@ -326,12 +388,19 @@ export default function ProjectDetails() {
                   </Link>
                 )}
               </div>
-              <p className="mt-3 whitespace-pre-line text-[12.5px] leading-[1.85] text-ink-600">
-                {project.job?.description || 'ไม่พบรายละเอียดโจทย์งาน'}
-              </p>
-              {project.job?.skills?.length > 0 && (
+              {jobLoading ? <p className="mt-3 text-sm text-ink-500">กำลังโหลดโจทย์งาน</p> : jobError ? (
+                <div className="mt-3">
+                  <InfoBanner tone="warning">โหลดรายละเอียดโจทย์งานไม่สำเร็จ</InfoBanner>
+                  <Button onClick={refreshJob} variant="ghost" size="sm">ลองอีกครั้ง</Button>
+                </div>
+              ) : (
+                <p className="mt-3 whitespace-pre-line text-[12.5px] leading-[1.85] text-ink-600">
+                  {job?.description || 'ไม่พบรายละเอียดโจทย์งาน'}
+                </p>
+              )}
+              {job?.skills?.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {project.job.skills.map((skill) => (
+                  {job.skills.map((skill) => (
                     <span key={skill} className="rounded-md bg-paper px-2 py-0.5 text-[10.5px] text-ink-500">
                       {skill}
                     </span>
@@ -358,6 +427,18 @@ export default function ProjectDetails() {
             <Button to="/messages" variant="secondary" size="sm" className="mt-3 w-full" icon={MessageSquare}>
               ส่งข้อความ
             </Button>
+            {isClient && project.status === 'completed' && project.escrowStatus === 'released' && (
+              <Button variant="brand" size="sm" className="mt-2 w-full" icon={Star}
+                disabled={project.freelancerReviewed !== false} onClick={() => setReviewProjectId(project.id)}>
+                {project.freelancerReviewed ? 'รีวิวแล้ว' : 'รีวิวฟรีแลนซ์'}
+              </Button>
+            )}
+            {isClient && awaitingPayout && (
+              <div className="mt-2"><ReviewPaymentStatus projectId={project.id} milestoneNumber={fundedMilestone?.id} /></div>
+            )}
+            {isClient && project.status === 'completed' && project.escrowStatus === 'released' && project.freelancerReviewed == null && (
+              <p className="mt-2 text-xs text-ink-500">ยืนยันการจ่ายเงินแล้ว · API รีวิวไม่พร้อมใช้งาน</p>
+            )}
           </div>
 
           <div className="card p-5">
@@ -386,9 +467,17 @@ export default function ProjectDetails() {
             </div>
             <div className="mt-3 flex items-start gap-2 rounded-lg bg-emerald-50/70 px-3 py-2">
               <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-              <p className="text-[10px] leading-relaxed text-emerald-800">
-                สถานะ payment เป็นข้อมูลจำลอง — การโอนจริงต้องรอ Smart Contract
-              </p>
+              {depositUrl ? (
+                <a href={depositUrl} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 hover:underline">
+                  ดูธุรกรรมฝากเงินล่าสุดบน Etherscan
+                  <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                </a>
+              ) : (
+                <p className="text-[10px] leading-relaxed text-emerald-800">
+                  ตรวจผลธุรกรรมได้จากหน้า Escrow
+                </p>
+              )}
             </div>
           </div>
 
@@ -397,17 +486,6 @@ export default function ProjectDetails() {
             <div className="mt-3 space-y-2">
               {isClient ? (
                 <>
-                  {!funded && project.status === 'active' && (
-                    <Button
-                      to={`/client/projects/${project.id}/escrow`}
-                      variant="brand"
-                      size="md"
-                      className="w-full"
-                      icon={Wallet}
-                    >
-                      ฝากเงินเข้า Escrow
-                    </Button>
-                  )}
                   {project.status === 'in_review' && (
                     <Button
                       to={`/client/projects/${project.id}/review`}
@@ -434,25 +512,26 @@ export default function ProjectDetails() {
                   )}
                   <Button
                     to={`/client/projects/${project.id}/escrow`}
-                    variant="secondary"
+                    variant="brand"
                     size="md"
                     className="w-full"
                     icon={Wallet}
                   >
-                    ดูสถานะ Escrow
+                    ข้อตกลงและการจ่ายเงิน
                   </Button>
                 </>
               ) : (
                 <>
-                  {['active', 'revision'].includes(project.status) && (
+                  <Button to={`/freelancer/projects/${project.id}/escrow`} variant="brand" size="md" className="w-full" icon={Wallet}>
+                    ดูข้อตกลงและสถานะ Escrow
+                  </Button>
+                  {project.canSubmitWork && (
                     <Button
                       to={`/freelancer/projects/${project.id}/submit`}
                       variant="brand"
                       size="md"
                       className="w-full"
                       icon={Send}
-                      disabled={!funded}
-                      title={!funded ? 'รอลูกค้าฝากเงินเข้า escrow ก่อน' : undefined}
                     >
                       {project.status === 'revision' ? 'แก้ไขและส่งงานใหม่' : 'ส่งงาน'}
                     </Button>
@@ -470,6 +549,9 @@ export default function ProjectDetails() {
                   </Button>
                 </>
               )}
+              <Button to={`/help?projectId=${project.id}#contact`} variant="ghost" size="sm" className="w-full">
+                แจ้งปัญหาโครงการให้แอดมิน
+              </Button>
             </div>
             {latestSubmission && (
               <p className="mt-3 rounded-lg bg-paper px-3 py-2 text-[10px] leading-relaxed text-ink-500">
@@ -478,11 +560,15 @@ export default function ProjectDetails() {
             )}
           </div>
 
-          <InfoBanner tone="warning" title="ข้อมูลจำลอง">
-            ความคืบหน้าและประวัติธุรกรรมทั้งหมดเป็น mock data
-          </InfoBanner>
         </aside>
       </div>
+      {reviewProjectId === project.id && (
+        <FreelancerReviewDialog project={project} onClose={() => setReviewProjectId(null)}
+          onSaved={(id) => {
+            setReviewProjectId(null)
+            setProject((current) => current?.id === id ? { ...current, freelancerReviewed: true } : current)
+          }} />
+      )}
     </div>
   )
 }

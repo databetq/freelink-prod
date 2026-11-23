@@ -63,9 +63,6 @@ export default function TransactionHistory() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="Mock ledger">
-        ทุกรายการเป็นข้อมูลจำลอง ไม่มี transaction hash จริง และไม่มีการโอนเงินบน blockchain
-      </InfoBanner>
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
@@ -172,7 +169,7 @@ export default function TransactionHistory() {
                         {tx.note}
                       </Link>
                       <span className="mt-0.5 inline-flex rounded-full bg-amber-50 px-1.5 py-0.5 text-[8.5px] font-semibold text-amber-700">
-                        {tx.isMock ? 'MOCK' : 'ON-CHAIN'}
+                        {tx.hash ? 'ON-CHAIN' : 'รอยืนยัน'}
                       </span>
                     </div>
                     <span className="text-[11px] text-ink-500">{transactionTypes[tx.type] || tx.type}</span>

@@ -25,6 +25,13 @@ export function Modal({
 }) {
   const panelRef = useRef(null)
   const reduced = useReducedMotion()
+  // Callers usually pass an inline `onClose`, which is a new function on every render. Keeping it in a
+  // ref stops the effect below from re-running (and moving focus) each time the parent re-renders,
+  // e.g. on every keystroke in a field inside the dialog.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
 
   useEffect(() => {
     if (!open) return undefined
@@ -32,14 +39,16 @@ export function Modal({
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const timer = setTimeout(() => {
-      const focusable = panelRef.current?.querySelector(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )
-      focusable?.focus()
+      const panel = panelRef.current
+      // Start on the first field so people can type straight away; the close button is only the fallback.
+      const target =
+        panel?.querySelector('input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled)') ||
+        panel?.querySelector('button, [href], [tabindex]:not([tabindex="-1"])')
+      target?.focus()
     }, 50)
 
     const handleKey = (event) => {
-      if (event.key === 'Escape') onClose?.()
+      if (event.key === 'Escape') onCloseRef.current?.()
     }
     document.addEventListener('keydown', handleKey)
     return () => {
@@ -48,7 +57,7 @@ export function Modal({
       document.body.style.overflow = previousOverflow
       previousActive?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (typeof document === 'undefined') return null
 

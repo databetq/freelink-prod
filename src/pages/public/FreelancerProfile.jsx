@@ -92,17 +92,17 @@ export default function FreelancerProfile() {
             <div className="absolute inset-0 bg-grid-dark opacity-40" aria-hidden="true" />
             <div className="absolute -right-10 top-0 h-48 w-48 rounded-full bg-white/20 blur-2xl" aria-hidden="true" />
           </div>
-          <div className="px-5 pb-6 sm:px-8">
-            <div className="-mt-12 flex flex-col gap-5 sm:-mt-14 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+          <div className="relative z-10 px-5 pb-6 sm:px-8">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
                 <Avatar
                   name={freelancer.name}
                   color={freelancer.avatarColor}
                   size="2xl"
                   ring
-                  className="h-24 w-24 sm:h-28 sm:w-28"
+                  className="-mt-12 h-24 w-24 sm:-mt-14 sm:h-28 sm:w-28"
                 />
-                <div className="pb-1">
+                <div className="min-w-0 pb-1 sm:pt-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px]">
                       {freelancer.name}
@@ -122,14 +122,16 @@ export default function FreelancerProfile() {
                       <MapPin className="h-3.5 w-3.5" /> {freelancer.location}
                     </span>
                     <RatingStars rating={freelancer.rating} count={freelancer.reviewsCount} showValue />
-                    <span className="inline-flex items-center gap-1">
-                      <Clock3 className="h-3.5 w-3.5" /> ตอบกลับ {freelancer.responseTime}
-                    </span>
+                    {freelancer.responseTime && (
+                      <span className="inline-flex items-center gap-1">
+                        <Clock3 className="h-3.5 w-3.5" /> ตอบกลับ {freelancer.responseTime}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 pb-1">
+              <div className="flex flex-wrap gap-2 pb-1 sm:pt-4">
                 {isOwnProfile ? (
                   <Button to="/freelancer/profile" variant="secondary" size="md">
                     แก้ไขโปรไฟล์ของฉัน
@@ -240,11 +242,11 @@ export default function FreelancerProfile() {
                         <RatingStars rating={review.rating} size="xs" />
                       </div>
                       <p className="mt-3 text-[12.5px] leading-relaxed text-ink-600">{review.comment}</p>
-                      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
+                      {review.criteria && <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
                         <span>คุณภาพ {review.criteria?.quality}/5</span>
                         <span>การสื่อสาร {review.criteria?.communication}/5</span>
                         <span>ตรงเวลา {review.criteria?.deadline}/5</span>
-                      </div>
+                      </div>}
                     </article>
                   ))
                 )}
@@ -265,16 +267,14 @@ export default function FreelancerProfile() {
                   <p className="text-[10px] text-ink-400">งานที่สำเร็จ</p>
                 </div>
                 <div>
-                  <p className="text-lg font-bold text-emerald-600">{freelancer.successRate}%</p>
+                  <p className="text-lg font-bold text-emerald-600">
+                    {freelancer.successRate == null ? '—' : `${freelancer.successRate}%`}
+                  </p>
                   <p className="text-[10px] text-ink-400">อัตราความสำเร็จ</p>
                 </div>
                 <div>
                   <p className="text-lg font-bold text-ink">{freelancer.reviewsCount}</p>
                   <p className="text-[10px] text-ink-400">รีวิว</p>
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-ink">8 ปี</p>
-                  <p className="text-[10px] text-ink-400">ประสบการณ์</p>
                 </div>
               </div>
               <div className="mt-4 flex items-start gap-2 rounded-xl bg-emerald-50/70 p-3">
@@ -308,9 +308,6 @@ export default function FreelancerProfile() {
               </Link>
             </div>
 
-            <InfoBanner tone="warning" title="โปรไฟล์ตัวอย่าง">
-              ข้อมูล ผลงาน และรีวิวทั้งหมดเป็น mock data
-            </InfoBanner>
 
             <div className="hidden items-center gap-2 text-[10px] text-ink-400 sm:flex">
               <Wallet className="h-3 w-3" />

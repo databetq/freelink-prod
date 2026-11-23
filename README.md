@@ -1,8 +1,8 @@
 # Freelink — Premium 3D Freelance Marketplace (Frontend)
 
-Frontend ของแพลตฟอร์มจ้างงานฟรีแลนซ์ 2 บทบาท (Client / Freelancer) สร้างด้วย React + Vite + Tailwind CSS พร้อมฉาก 3D จริงด้วย Three.js / React Three Fiber และพร้อมเชื่อมต่อ Backend API กับ Solidity Smart Contract ในภายหลัง
+Frontend ของแพลตฟอร์มจ้างงานฟรีแลนซ์ 2 บทบาท (Client / Freelancer) สร้างด้วย React + Vite + Tailwind CSS พร้อมฉาก 3D จริงด้วย Three.js / React Three Fiber และเชื่อมต่อ FastAPI กับ Solidity Smart Contract
 
-> **สถานะปัจจุบัน:** ทุกอย่างทำงานด้วย **Mock Data / Mock Authentication** โดยเจตนา — ยังไม่มีการเชื่อมต่อ Backend, OAuth หรือ Blockchain จริง ปุ่มที่ต้องรอระบบหลังบ้านจะแจ้งตรงไปตรงมาและไม่รายงานความสำเร็จปลอม
+> Frontend ดึงข้อมูลผ่าน FastAPI REST API และใช้ Google Login ผ่าน backend งาน ข้อเสนอ และโปรเจกต์อ่านจาก PostgreSQL ฟีเจอร์ที่ยังไม่มี endpoint จะแจ้งสถานะตาม API
 
 ---
 
@@ -27,11 +27,11 @@ Frontend ของแพลตฟอร์มจ้างงานฟรีแ�
 ```bash
 cd freelance-marketplace
 npm install
-cp .env.example .env   # ไม่จำเป็นต้องแก้ค่าใด ๆ เพื่อรันโหมด mock
+cp .env.example .env
 npm run dev
 ```
 
-เปิด `http://localhost:5173`
+เปิด `http://localhost:5173` โดยรัน [FastAPI และ PostgreSQL](backend/README.md) ไว้ที่ `http://localhost:8000`
 
 คำสั่งอื่น:
 
@@ -46,9 +46,7 @@ npm run preview   # preview dist
 
 | ตัวแปร | ค่าเริ่มต้น | ความหมาย |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | ว่าง | Base URL ของ Backend (เว้นว่าง = ใช้ mock) |
-| `VITE_USE_MOCK_API` | `true` | `false` เมื่อ API พร้อมจริงเท่านั้น |
-| `VITE_GOOGLE_CLIENT_ID` | ว่าง | Google OAuth client id (public) |
+| `VITE_API_BASE_URL` | `http://localhost:8000` ในโหมด dev | Base URL ของ FastAPI ตั้งค่านี้ก่อน build สำหรับการใช้งานจริง |
 | `VITE_CHAIN_ID` | ว่าง | Chain ID ที่ทีม Contract กำหนด |
 | `VITE_CONTRACT_ADDRESS` | ว่าง | ที่อยู่ Escrow Contract |
 | `VITE_EXPLORER_URL` | ว่าง | Block explorer สำหรับลิงก์ธุรกรรม |
@@ -57,14 +55,14 @@ npm run preview   # preview dist
 
 ---
 
-## 3. การเข้าใช้งานโหมดทดลอง (Mock)
+## 3. การเข้าสู่ระบบ
 
 1. ไปที่ `/login`
-2. เลือกบทบาท **“ฉันต้องการจ้างงาน”** หรือ **“ฉันต้องการรับงาน”**
-3. กรอกอีเมลใดก็ได้ และรหัสผ่านอย่างน้อย 6 ตัวอักษร (ไม่มีการตรวจสอบจริง) **หรือ** กด **“ดำเนินการต่อด้วย Google”**
+2. ถ้ายังไม่มีบัญชี ให้ไปที่ `/register` แล้วเลือกบทบาท **“ฉันต้องการจ้างงาน”** หรือ **“ฉันต้องการรับงาน”**
+3. กด **“ดำเนินการต่อด้วย Google”** หลังตั้งค่า OAuth ตาม [คู่มือ backend](backend/README.md)
 4. ระบบจะพาไปยัง Dashboard ของบทบาทนั้น
 
-ข้อมูลตัวอย่างทั้งหมดถูกแยกไว้ใน `src/services/mocks/` และมีข้อความ “Mock / ข้อมูลตัวอย่าง” กำกับใน UI จุดสำคัญ เช่น หน้า Wallet, Escrow, Login และ Transaction
+ข้อมูลจำลองสำหรับทดสอบอยู่ใน [tests/fixtures/data.mock.js](tests/fixtures/data.mock.js)
 
 ---
 
@@ -114,10 +112,9 @@ freelance-marketplace/
 │   ├── contexts/             # AuthContext, ToastContext, WalletContext
 │   ├── services/
 │   │   ├── api/              # apiClient, endpoints, authService, jobService, ...
-│   │   ├── auth/             # authService (mock ↔ real switch)
+│   │   ├── auth/             # Google redirect และ session API
 │   │   ├── blockchain/       # walletService, contractService, transactionService
-│   │   └── mocks/            # mock data + mock services
-│   ├── data/                 # seed mock data
+│   ├── data/                 # เนื้อหา FAQ
 │   ├── utils/                # format, validators, cn
 │   ├── constants/            # categories, status maps, navigation
 │   ├── config/               # appConfig, contractConfig
@@ -171,14 +168,13 @@ Path alias `@` ชี้ไปที่ `src` (ตั้งค่าใน `vite
 
 ## 8. การเชื่อมต่อ Backend
 
-โหมด mock/real ถูกสลับที่ `VITE_USE_MOCK_API` โดย UI ไม่ต้องแก้
+Frontend ใช้ REST API ผ่าน Axios และส่ง session cookie กับคำขอ
 
 - `src/services/api/apiClient.js` — Axios instance, แนบ Bearer token, normalize error
 - `src/services/api/endpoints.js` — **DRAFT** endpoint map (ยังไม่ยืนยันกับทีม Backend)
 - `src/services/api/jobService.js`, `proposalService.js`, `projectService.js`, `profileService.js`, `notificationService.js`, `transactionService.js`, `authService.js`
-- ทุก service เรียก mock ก่อนเมื่อ `VITE_USE_MOCK_API=true` และเรียก API จริงเมื่อปิด mock
-- `src/services/auth/authService.js` — mock login / Google mock / session, พร้อมสลับไป OAuth จริง
-- `src/services/mocks/` — mock data ทั้งหมด (Job, Freelancer, Proposal, Project, Notification, Transaction, Message)
+- `src/services/auth/authService.js` — Google Login และคืน session จาก API
+- `tests/fixtures/` — ข้อมูลและ services จำลองที่ใช้สำหรับทดสอบ
 
 รายละเอียดสัญญา API และ checklist สำหรับเพื่อนร่วมทีมอยู่ใน **[INTEGRATION.md](./INTEGRATION.md)**
 
@@ -200,7 +196,7 @@ Path alias `@` ชี้ไปที่ `src` (ตั้งค่าใน `vite
 
 - `npm run build` ผ่าน (Vite production build)
 - เปิด route หลักทั้งหมดใน `AppRoutes` ด้วย Chrome headless (Desktop 1440×900 + Mobile 390×844) — ไม่มี page error, ไม่มี console error และหน้า public/แดชบอร์ดหลักไม่พบ horizontal overflow
-- ทดสอบ workflow จริงบน mock:
+- ผลการทดสอบของ UI รุ่นก่อนย้ายข้อมูลจำลองไปเป็น fixture:
   - Client สร้างประกาศงาน → ปรากฏใน Manage Jobs
   - Freelancer ส่งข้อเสนอต่องานที่สร้างใหม่ → ปรากฏใน My Proposals
   - Freelancer ขอถอนเงิน → toast ยืนยันคำขอ (mock)
@@ -217,19 +213,18 @@ Path alias `@` ชี้ไปที่ `src` (ตั้งค่าใน `vite
 
 ## 11. ข้อจำกัดที่ทราบ
 
-- ไม่มี Backend / Database / Smart Contract ตามขอบเขตงาน
-- Mock authentication ไม่ใช่การยืนยันตัวตนจริง และไม่ควรใช้ production
-- การชำระเงิน, Escrow, Transaction Hash เป็น mock จนกว่าจะเชื่อม wallet + contract จริง
-- หน้า Admin เป็น UI ตัวอย่าง ไม่มีระบบสิทธิ์
+- FastAPI มี API สำหรับ Auth, Jobs, Proposals และ Projects ส่วนโปรไฟล์ แชต แจ้งเตือน และประวัติธุรกรรมยังรอ endpoint
+- ธุรกรรม Escrow ใช้ wallet กับ contract บน Sepolia การซิงก์สถานะเข้าฐานข้อมูลเป็นงานแยก
+- หน้า Admin ต้องใช้บัญชีบทบาท admin และยังรอ REST endpoint
 - Google Fonts ต้องใช้อินเทอร์เน็ต (มี fallback เป็น system font)
-- ยังไม่มีชุดทดสอบ automated test ในโปรเจกต์ (ตรวจด้วยสคริปต์ QA ชั่วคราวเท่านั้น)
+- ชุดทดสอบ backend อยู่ที่ `backend/tests/`
 
 ---
 
 ## 12. Workflow แนะนำสำหรับทีม
 
 1. อ่าน `INTEGRATION.md` และยืนยัน endpoint/response shape กับทีม Backend
-2. เติมค่า `.env` และตั้ง `VITE_USE_MOCK_API=false`
+2. ตั้ง `VITE_API_BASE_URL` ให้ตรงกับ FastAPI
 3. แก้ `src/services/api/endpoints.js` ให้ตรงกับ API จริง
 4. ปรับ service ที่เกี่ยวข้อง (โดยไม่ต้องแตะ UI)
 5. เติม `contractConfig.js` (ABI, address, chain id, methods) เมื่อ Contract พร้อม

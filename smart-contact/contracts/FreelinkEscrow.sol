@@ -71,6 +71,7 @@ contract FreelinkEscrow is Ownable, ReentrancyGuard {
     error InvalidDeadline();
     error InvalidDuration();
     error InvalidTerms();
+    error TermsMismatch();
     error InvalidShare();
     error InvalidLimit();
     error AlreadyExists();
@@ -185,10 +186,12 @@ contract FreelinkEscrow is Ownable, ReentrancyGuard {
     }
 
     /// @notice client ตรวจรับงานแล้วปล่อยเงินให้ freelancer (ทำได้ทันทีที่ freelancer ยอมรับงานแล้ว)
+    ///         ระหว่างพิพาทก็ทำได้ (ยอมแพ้) เพราะเสียเปรียบแค่ client เอง ค่าธรรมเนียมคิดเต็มเหมือนปล่อยเงินปกติ
     function releasePayment(bytes32 escrowId) external nonReentrant {
         Escrow storage e = escrows[escrowId];
         if (msg.sender != e.client) revert NotAuthorized();
-        if (e.status != Status.Active && e.status != Status.Submitted) revert InvalidStatus();
+        Status s = e.status;
+        if (s != Status.Active && s != Status.Submitted && s != Status.Disputed) revert InvalidStatus();
         _releaseToFreelancer(escrowId, e);
     }
 
@@ -215,11 +218,19 @@ contract FreelinkEscrow is Ownable, ReentrancyGuard {
     // ---------- Freelancer ----------
 
     /// @notice ยอมรับงาน — ต้องส่ง termsHash เดียวกับที่ client ผูกไว้ตอนฝาก เพื่อยืนยันว่าเห็นเงื่อนไขเดียวกัน
-    function acceptEscrow(bytes32 escrowId, bytes32 termsHash) external {
+    ///         และส่งค่าจ้างกับ deadline ตามข้อตกลงมาด้วย contract อ่าน JSON ของข้อตกลงไม่ได้
+    ///         จึงต้องเทียบตัวเลขสองตัวนี้เอง กันกรณี client ฝากยอดเงินหรือ deadline ไม่ตรงกับที่ตกลง
+    function acceptEscrow(
+        bytes32 escrowId,
+        bytes32 termsHash,
+        uint256 expectedAmount,
+        uint64 expectedDeadline
+    ) external {
         Escrow storage e = escrows[escrowId];
         if (msg.sender != e.freelancer) revert NotAuthorized();
         if (e.status != Status.Funded) revert InvalidStatus();
         if (termsHash != e.termsHash) revert InvalidTerms();
+        if (expectedAmount != e.amount || expectedDeadline != e.deadline) revert TermsMismatch();
         if (block.timestamp >= e.deadline) revert DeadlinePassed();
         e.status = Status.Active;
         emit EscrowAccepted(escrowId, msg.sender);
@@ -250,18 +261,20 @@ contract FreelinkEscrow is Ownable, ReentrancyGuard {
 
     /// @notice คืนเงินให้ client เต็มจำนวนรวมค่าธรรมเนียม
     ///  - ยังไม่ accept (Funded): client หรือ freelancer เรียกได้ทุกเมื่อ (ยกเลิก / ปฏิเสธรับงาน)
-    ///  - freelancer เรียกได้ทุกเมื่อก่อนจบงาน (ยอมยกเลิก)
+    ///  - freelancer เรียกได้ทุกเมื่อก่อนจบงาน (ยอมยกเลิก) รวมถึงระหว่างพิพาท (ยอมแพ้)
     ///  - client เรียกได้หลัง deadline ถ้ายังทำงานอยู่ (Active) และไม่เคยส่งงาน — หลังส่งงานแล้ว
-    ///    (รวมถึงระหว่างแก้งาน) ต้องใช้ openDispute
+    ///    (รวมถึงระหว่างแก้งาน) ต้องใช้ openDispute และระหว่างพิพาทต้องรอคำตัดสิน
     function refundClient(bytes32 escrowId) external nonReentrant {
         Escrow storage e = escrows[escrowId];
         Status s = e.status;
-        if (s != Status.Funded && s != Status.Active && s != Status.Submitted) revert InvalidStatus();
+        if (s != Status.Funded && s != Status.Active && s != Status.Submitted && s != Status.Disputed) {
+            revert InvalidStatus();
+        }
 
         if (msg.sender == e.freelancer) {
             // ok
         } else if (msg.sender == e.client) {
-            if (s == Status.Submitted) revert InvalidStatus();
+            if (s == Status.Submitted || s == Status.Disputed) revert InvalidStatus();
             // เคยส่งงานแล้ว (อยู่ระหว่างแก้งาน) → ขอเงินคืนเองไม่ได้ ต้องเปิด dispute ให้ arbiter ตัดสิน
             if (s == Status.Active && e.revisionCount > 0) revert DisputeRequired();
             if (s == Status.Active && block.timestamp <= e.deadline) revert NotYetRefundable();
@@ -408,8 +421,14 @@ contract FreelinkEscrow is Ownable, ReentrancyGuard {
 
     /// @dev ถ้าโอนไม่สำเร็จ (ผู้รับปฏิเสธ ETH) จะบันทึกเป็นยอดค้างให้มาเบิกเอง แทนที่จะ revert
     ///      เพื่อไม่ให้ผู้รับฝ่ายหนึ่งขวางเงินของอีกฝ่าย
+    ///      ใช้ assembly call ที่ outSize = 0 เพื่อไม่ copy returndata กลับมา ถ้าใช้ to.call{value}("")
+    ///      ผู้รับที่เป็น contract จะตอบกลับข้อมูลก้อนใหญ่จนผู้เรียกเสีย gas ค่า memory หมด แล้วทั้งธุรกรรมล้ม
+    ///      (returndata bomb) ซึ่งทำให้ขวางคำตัดสินแบบแบ่งเงินและการแบ่งครึ่งตอนหมดเวลาได้
     function _send(address to, uint256 value) private {
-        (bool ok, ) = to.call{value: value}("");
+        bool ok;
+        assembly {
+            ok := call(gas(), to, value, 0, 0, 0, 0)
+        }
         if (!ok) {
             pendingWithdrawals[to] += value;
             emit PayoutDeferred(to, value);

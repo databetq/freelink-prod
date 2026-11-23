@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, ExternalLink, Plus, Save, Trash2, X } from 'lucide-react'
+import { Check, ExternalLink, Plus, Save, Trash2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { useAsync } from '@/hooks/useAsync'
@@ -12,10 +12,24 @@ import { Input, Select, Textarea } from '@/components/common/FormField'
 import { Modal } from '@/components/common/Modal'
 import { ProgressBar } from '@/components/common/ProgressBar'
 import { InfoBanner } from '@/components/common/InfoBanner'
+import { SelectWithOther } from '@/components/common/SelectWithOther'
+import { SkillPicker } from '@/components/common/SkillPicker'
 import { FreelancerCard } from '@/components/profile/FreelancerCard'
 import { PageLoader } from '@/components/common/LoadingSkeleton'
 import { ErrorState } from '@/components/common/ErrorState'
-import { availabilityOptions } from '@/constants'
+import {
+  allSkills,
+  availabilityOptions,
+  categories,
+  commonSkills,
+  freelancerTitleCategory,
+  freelancerTitleGroups,
+  hourlyRateOptions,
+  popularSkills,
+  remoteLocation,
+  skillCatalog,
+  thaiProvinces,
+} from '@/constants'
 import { formatCurrency } from '@/utils/format'
 import { validate, minLength, positiveNumber, required } from '@/utils/validators'
 import { cn } from '@/utils/cn'
@@ -38,6 +52,15 @@ const portfolioAccents = [
 
 const emptyPortfolio = { title: '', category: '', description: '', accent: portfolioAccents[0] }
 
+const MAX_HOURLY_RATE = 1_000_000
+
+const portfolioCategories = categories.map((category) => category.label)
+
+const locationGroups = [
+  { options: [remoteLocation] },
+  { label: 'จังหวัดในประเทศไทย', options: thaiProvinces },
+]
+
 export default function ProfileSettings() {
   useDocumentTitle('ตั้งค่าโปรไฟล์ฟรีแลนซ์')
   const { profileId, updateUser } = useAuth()
@@ -57,7 +80,6 @@ export default function ProfileSettings() {
     avatarColor: avatarColors[0],
   })
   const [skills, setSkills] = useState([])
-  const [skillInput, setSkillInput] = useState('')
   const [languages, setLanguages] = useState('')
   const [portfolio, setPortfolio] = useState([])
   const [errors, setErrors] = useState({})
@@ -94,14 +116,26 @@ export default function ProfileSettings() {
     })
   }
 
-  const addSkill = () => {
-    const value = skillInput.trim().replace(/,$/, '')
-    if (!value) return
-    if (!skills.some((skill) => skill.toLowerCase() === value.toLowerCase())) {
-      setSkills((current) => [...current, value])
-    }
-    setSkillInput('')
+  const updateSkills = (next) => {
+    setSkills(next)
+    setErrors((current) => {
+      if (!current.skills || next.length === 0) return current
+      const rest = { ...current }
+      delete rest.skills
+      return rest
+    })
   }
+
+  // The chosen role decides which skills are suggested first; typing in the picker still finds any skill.
+  const titleCategory = freelancerTitleCategory[values.title]
+  const suggestedSkills = useMemo(
+    () => (titleCategory ? [...skillCatalog[titleCategory], ...commonSkills] : [...popularSkills, ...commonSkills]),
+    [titleCategory],
+  )
+  const hourlyRateChoices = useMemo(
+    () => hourlyRateOptions.map((rate) => ({ value: String(rate), label: `${formatCurrency(rate)} / ชั่วโมง` })),
+    [],
+  )
 
   const addPortfolioItem = () => {
     const nextErrors = validate(portfolioDraft, {
@@ -132,7 +166,11 @@ export default function ProfileSettings() {
     const nextErrors = validate(values, {
       name: [required('ชื่อ'), minLength(2, 'ชื่อ')],
       title: [required('ตำแหน่ง'), minLength(3, 'ตำแหน่ง')],
-      hourlyRate: [required('อัตราค่าจ้าง'), positiveNumber('อัตราค่าจ้าง')],
+      hourlyRate: [
+        required('อัตราค่าจ้าง'),
+        positiveNumber('อัตราค่าจ้าง'),
+        (value) => (Number(value) > MAX_HOURLY_RATE ? `อัตราค่าจ้างต้องไม่เกิน ${formatCurrency(MAX_HOURLY_RATE)}` : null),
+      ],
       bio: [required('เกี่ยวกับคุณ'), minLength(40, 'เกี่ยวกับคุณ')],
     })
     if (skills.length === 0) nextErrors.skills = 'เพิ่มทักษะอย่างน้อย 1 รายการ'
@@ -155,7 +193,7 @@ export default function ProfileSettings() {
         portfolio,
       })
       updateUser({ name: values.name, title: values.title, avatarColor: values.avatarColor })
-      toast.success('บันทึกโปรไฟล์แล้ว', 'ข้อมูลถูกอัปเดตใน mock database — ยังไม่ผูกกับ Backend')
+      toast.success('บันทึกโปรไฟล์แล้ว', 'บันทึกการเปลี่ยนแปลงบนเซิร์ฟเวอร์แล้ว')
       refresh()
     } catch (err) {
       toast.error('บันทึกไม่สำเร็จ', err.message)
@@ -208,28 +246,38 @@ export default function ProfileSettings() {
                 error={errors.name}
                 required
               />
-              <Input
+              <SelectWithOther
                 label="ตำแหน่ง / ความเชี่ยวชาญ"
                 value={values.title}
-                onChange={(event) => setField('title', event.target.value)}
+                onChange={(next) => setField('title', next)}
+                groups={freelancerTitleGroups}
+                placeholder="เลือกตำแหน่ง"
                 error={errors.title}
-                placeholder="เช่น Senior Product Designer"
+                customInputProps={{ placeholder: 'เช่น Rust Engineer', maxLength: 200 }}
                 required
               />
-              <Input
+              <SelectWithOther
                 label="ที่ตั้ง"
                 value={values.location}
-                onChange={(event) => setField('location', event.target.value)}
-                placeholder="เชียงใหม่"
+                onChange={(next) => setField('location', next)}
+                groups={locationGroups}
+                placeholder="ไม่ระบุ"
+                customInputProps={{ placeholder: 'เช่น Singapore หรือ อำเภอหาดใหญ่ สงขลา', maxLength: 200 }}
               />
-              <Input
+              <SelectWithOther
                 label="อัตราค่าจ้างต่อชั่วโมง (บาท)"
-                type="number"
-                min="0"
                 value={values.hourlyRate}
-                onChange={(event) => setField('hourlyRate', event.target.value)}
+                onChange={(next) => setField('hourlyRate', next)}
+                options={hourlyRateChoices}
+                placeholder="เลือกอัตราค่าจ้าง"
                 error={errors.hourlyRate}
-                hint={values.hourlyRate ? formatCurrency(Number(values.hourlyRate)) : undefined}
+                customInputProps={{
+                  type: 'number',
+                  min: '1',
+                  step: '1',
+                  placeholder: 'เช่น 1200',
+                  hint: values.hourlyRate ? `${formatCurrency(Number(values.hourlyRate))} / ชั่วโมง` : 'ระบุเป็นบาทต่อชั่วโมง',
+                }}
                 required
               />
               <Select
@@ -268,46 +316,20 @@ export default function ProfileSettings() {
               <h2 className="text-sm font-bold">ทักษะ</h2>
               <span className="text-[10px] text-ink-400">{skills.length} รายการ</span>
             </div>
-            <div className="mt-3 flex gap-2">
-              <input
-                value={skillInput}
-                onChange={(event) => setSkillInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ',') {
-                    event.preventDefault()
-                    addSkill()
-                  }
-                }}
-                placeholder="พิมพ์ทักษะแล้วกด Enter เช่น Design System"
-                className={cn('field-control', errors.skills && 'field-error')}
-                aria-label="เพิ่มทักษะ"
+            <div className="mt-3">
+              <SkillPicker
+                label="เพิ่มทักษะ"
+                value={skills}
+                onChange={updateSkills}
+                suggestions={suggestedSkills}
+                catalog={allSkills}
+                suggestionsLabel={titleCategory ? `แนะนำสำหรับ ${values.title}` : 'ทักษะยอดนิยม'}
+                error={errors.skills}
               />
-              <Button type="button" variant="secondary" size="md" icon={Plus} onClick={addSkill}>
-                เพิ่ม
-              </Button>
             </div>
-            {errors.skills && <p className="mt-1.5 text-xs font-medium text-rose-600">{errors.skills}</p>}
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {skills.map((skill) => (
-                <span
-                  key={skill}
-                  className="inline-flex items-center gap-1 rounded-lg border border-brand-100 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700"
-                >
-                  {skill}
-                  <button
-                    type="button"
-                    onClick={() => setSkills((current) => current.filter((item) => item !== skill))}
-                    className="rounded p-0.5 transition hover:bg-brand-100"
-                    aria-label={`ลบทักษะ ${skill}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-              {skills.length === 0 && (
-                <p className="text-[11px] text-ink-400">ยังไม่มีทักษะ — เพิ่มอย่างน้อย 3 รายการเพื่อโปรไฟล์ที่สมบูรณ์</p>
-              )}
-            </div>
+            {skills.length < 3 && (
+              <p className="mt-3 text-[11px] text-ink-400">เพิ่มอย่างน้อย 3 รายการเพื่อโปรไฟล์ที่สมบูรณ์</p>
+            )}
           </section>
 
           <section className="card p-5">
@@ -443,10 +465,6 @@ export default function ProfileSettings() {
             </div>
           </div>
 
-          <InfoBanner tone="warning" title="ข้อมูลจำลอง">
-            การเปลี่ยนแปลงโปรไฟล์มีผลเฉพาะ mock database ในเบราว์เซอร์
-            และจะหายไปเมื่อรีเซ็ตข้อมูลตัวอย่าง
-          </InfoBanner>
         </aside>
       </form>
 
@@ -475,12 +493,14 @@ export default function ProfileSettings() {
             placeholder="เช่น Merchant Analytics Dashboard"
             required
           />
-          <Input
+          <SelectWithOther
             label="หมวดหมู่"
             value={portfolioDraft.category}
-            onChange={(event) => setPortfolioDraft({ ...portfolioDraft, category: event.target.value })}
+            onChange={(next) => setPortfolioDraft((current) => ({ ...current, category: next }))}
+            options={portfolioCategories}
+            placeholder="เลือกหมวดหมู่"
             error={portfolioErrors.category}
-            placeholder="เช่น SaaS · Product Design"
+            customInputProps={{ placeholder: 'เช่น SaaS · Product Design', maxLength: 100 }}
             required
           />
           <Textarea

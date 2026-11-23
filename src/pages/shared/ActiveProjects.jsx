@@ -62,9 +62,6 @@ export default function ActiveProjects() {
         }
       />
 
-      <InfoBanner tone="warning" className="mb-5" title="Mock projects">
-        โครงการและความคืบหน้าเป็นข้อมูลจำลอง การเปลี่ยนแปลงสถานะจะถูกเก็บใน mock database
-      </InfoBanner>
 
       <Tabs
         value={tab}

@@ -1,7 +1,7 @@
 # Integration Checklist — Backend & Solidity
 
 เอกสารนี้สำหรับเพื่อนร่วมทีมที่รับผิดชอบ **Backend, Database และ Solidity Smart Contract**
-Frontend ถูกออกแบบให้ทำงานด้วย mock ได้ครบทุก workflow และสลับไปใช้ของจริงโดยแก้ที่ service layer เป็นหลัก
+Frontend เรียก FastAPI REST API ผ่าน service layer ข้อมูลจำลองสำหรับทดสอบอยู่ใน `tests/fixtures/`
 
 > ⚠️ Endpoint, response shape, ABI, address, chain id และชื่อฟังก์ชันทั้งหมดในตอนนี้เป็น **ข้อเสนอ/placeholder** ยังไม่ได้รับการยืนยัน ห้ามถือว่าเป็นสัญญาที่ตกลงแล้ว
 
@@ -40,20 +40,16 @@ Frontend ถูกออกแบบให้ทำงานด้วย mock �
 ไฟล์ `.env.example` มีค่าเหล่านี้แล้ว:
 
 ```env
-VITE_API_BASE_URL=
-VITE_USE_MOCK_API=true
-VITE_GOOGLE_CLIENT_ID=
+VITE_API_BASE_URL=http://localhost:8000
 VITE_CHAIN_ID=
 VITE_CONTRACT_ADDRESS=
 VITE_EXPLORER_URL=
-VITE_THB_PER_ETH=
 ```
 
-> ส่วน Smart Contract ต่อกับ FreelinkEscrow v2 (native ETH) แล้ว ABI อยู่ที่ `src/config/FreelinkEscrow.abi.json` (สำเนาจาก `smart-contact/abi/`) และ `.env.example` มีค่าของ Sepolia testnet ให้ ส่วน `VITE_THB_PER_ETH` คืออัตราคงที่บาทต่อ 1 ETH (ข้อตกลงชั่วคราว ว่าง = ฝากเงินไม่ได้)
+> Smart Contract ใช้ FreelinkEscrow v2 บน Sepolia และ ABI อยู่ที่ `src/config/FreelinkEscrow.abi.json` (สำเนาจาก `smart-contact/abi/`) FastAPI ใช้ `ESCROW_THB_PER_ETH` และส่งยอด wei ของข้อตกลงให้หน้าเว็บ ตาม [วิธีตั้งค่า backend](backend/README.md)
 
 - `VITE_*` ถูกฝังใน browser ทั้งหมด → **ห้ามใส่ secret**
-- ค่า `VITE_USE_MOCK_API=true` คือค่าเริ่มต้น; จะเปลี่ยนเป็น `false` เมื่อ API พร้อมและทดสอบแล้วเท่านั้น
-- หาก `VITE_API_BASE_URL` ว่าง ระบบจะไม่พยายามเรียก API จริง และจะแจ้ง `API_NOT_CONFIGURED`
+- โหมด dev ใช้ `http://localhost:8000` ถ้าไม่ระบุ URL ให้ตั้ง `VITE_API_BASE_URL` ก่อน build สำหรับระบบที่ deploy
 
 ---
 
@@ -61,23 +57,22 @@ VITE_THB_PER_ETH=
 
 | ไฟล์ | หน้าที่ | สถานะ |
 | --- | --- | --- |
-| `src/services/api/apiClient.js` | Axios instance, token, error normalize | พร้อมใช้ |
+| `src/services/api/apiClient.js` | Axios instance, session cookie, error normalize | พร้อมใช้ |
 | `src/services/api/endpoints.js` | แผนที่ endpoint | **DRAFT — ต้องยืนยัน** |
 | `src/services/api/authService.js` | `/auth/me`, `/auth/logout`, Google URL | **DRAFT** |
-| `src/services/api/jobService.js` | งาน / ประกาศ | mock + real branch |
-| `src/services/api/proposalService.js` | ข้อเสนอ | mock + real branch |
-| `src/services/api/projectService.js` | โครงการ / ส่งงาน / ตรวจรับ | mock + real branch |
-| `src/services/api/profileService.js` | โปรไฟล์ / รีวิว | mock + real branch |
-| `src/services/api/notificationService.js` | การแจ้งเตือน | mock + real branch |
-| `src/services/api/transactionService.js` | ธุรกรรม / ถอนเงิน | mock + real branch |
-| `src/services/auth/authService.js` | mock login ↔ OAuth จริง | พร้อมสลับ |
-| `src/services/mocks/*` | ข้อมูลตัวอย่าง | ใช้เมื่อ mock mode |
+| `src/services/api/jobService.js` | งาน / ประกาศ | เรียก REST API |
+| `src/services/api/proposalService.js` | ข้อเสนอ | เรียก REST API |
+| `src/services/api/projectService.js` | โครงการ / ส่งงาน / ตรวจรับ | เรียก REST API |
+| `src/services/api/profileService.js` | โปรไฟล์ / รีวิว | เรียก REST API |
+| `src/services/api/notificationService.js` | การแจ้งเตือน | เรียก REST API |
+| `src/services/api/transactionService.js` | ธุรกรรม / ถอนเงิน | เรียก REST API |
+| `src/services/auth/authService.js` | Google Login และ session | เรียก REST API |
+| `tests/fixtures/` | ข้อมูลจำลอง | สำหรับทดสอบ |
 
-แนวทางสลับ:
+ตัวอย่างการเรียก REST API
 
 ```js
 // ตัวอย่างที่มีอยู่แล้วในทุก service
-if (appConfig.useMockApi) return mock.someMethod(args)
 assertApiConfigured()
 return apiClient.get(endpoints....).then((r) => r.data)
 ```
@@ -122,17 +117,18 @@ return apiClient.get(endpoints....).then((r) => r.data)
 | `POST` | `/projects/:id/approve` | Review Work |
 | `POST` | `/projects/:id/request-revision` | Request Revision |
 
-### Profiles / Reviews
-`GET /freelancers`, `GET /freelancers/:id`, `GET /clients/:id`, `GET /freelancers/:id/reviews`
+### Profiles
+`GET /freelancers`, `GET`/`PATCH /freelancers/:id`, `GET`/`PATCH /clients/:id`
+(ยังไม่มี `GET /freelancers/:id/reviews` — รอโฟลว์ปิดโปรเจกต์และรีวิว)
 
 ### Notifications
-`GET /notifications`, `PATCH /notifications/:id/read`, `POST /notifications/read-all`
+`GET /notifications`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`
 
 ### Transactions
-`GET /transactions`, `GET /transactions/:id`, `POST /transactions/withdraw`
+`GET /transactions` (ว่างจนกว่าจะซิงก์ escrow) — `GET /transactions/:id` และ `POST /transactions/withdraw` ยังไม่เปิด
 
-### Messages (มี mock service แล้ว)
-`GET /messages/threads`, `GET /messages/threads/:id`, `POST /messages/threads/:id/messages`
+### Messages
+`GET /messages/threads`, `GET /messages/threads/:id`, `POST /messages/threads/:id/messages`, `PATCH /messages/threads/:id/read`
 
 > หาก path/ método ต่างจากนี้ ให้แจ้งเพื่อปรับ `endpoints.js`
 
@@ -140,7 +136,7 @@ return apiClient.get(endpoints....).then((r) => r.data)
 
 ## 5. Response Shape ที่ UI ใช้
 
-UI อ่าน field ตาม mock data ใน `src/services/mocks/` และ `src/data/`
+ตรวจ response ของ endpoint ที่เปิดใช้งานจริงจาก OpenAPI ของ FastAPI
 ตัวอย่างที่สำคัญ:
 
 **Job**
@@ -201,14 +197,9 @@ UI อ่าน field ตาม mock data ใน `src/services/mocks/` และ
 
 ## 7. Authentication
 
-- ปัจจุบัน Login เป็น mock: เลือกบทบาท → สร้าง session ปลอมใน `localStorage`
-- Session key: `freelink.auth.session`, token key: `freelink.auth.token`
-- เมื่อได้ระบบจริง:
-  1. เปลี่ยน `authService.signInWithRole` / `signInWithGoogle` ให้เรียก OAuth
-  2. เก็บ token ตามที่ตกลง (แนะนำ httpOnly cookie ถ้าเป็นไปได้)
-  3. ปรับ `fetchCurrentUser` ให้โหลด `/auth/me`
-  4. รักษา shape ของ `user` ที่มี `role`, `profileId`, `name`, `email` เพื่อไม่ให้ UI พัง
-- Google: ต้องมี client id และ callback URL ที่ตรงกัน; frontend ยังไม่ผูก callback
+- FastAPI รับ Google OAuth callback และออก session cookie แบบ HttpOnly
+- React อ่าน `GET /auth/me` ตอนเปิดแอป Response มี `role`, `profileId`, `name` และ `email`
+- ตั้งค่า Google client และ callback ใน [backend/.env](backend/.env.example) โดยใช้ host เดียวกันสำหรับ frontend และ API ในเครื่อง
 - **ห้ามเก็บ password/secret ใน frontend**
 
 ---

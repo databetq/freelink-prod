@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown, LayoutDashboard, LogOut, Settings, UserRound } from 'lucide-react'
+import { useToast } from '@/contexts/ToastContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { dashboardForRole } from '@/services/auth/authService'
 import { Avatar } from '@/components/common/Avatar'
 import { cn } from '@/utils/cn'
 
 export function UserMenu({ compact = false, dark = false }) {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const toast = useToast()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -29,8 +32,8 @@ export function UserMenu({ compact = false, dark = false }) {
 
   if (!user) return null
 
-  const dashboardPath = user.role === 'client' ? '/client/dashboard' : '/freelancer/dashboard'
-  const profilePath = user.role === 'client' ? '/client/profile' : '/freelancer/profile'
+  const dashboardPath = dashboardForRole(user.role)
+  const isAdmin = user.role === 'admin'
 
   return (
     <div className="relative" ref={ref}>
@@ -65,7 +68,7 @@ export function UserMenu({ compact = false, dark = false }) {
             <p className="truncate text-sm font-semibold text-ink">{user.name}</p>
             <p className="truncate text-[11px] text-ink-500">{user.email}</p>
             <span className="mt-1.5 inline-flex rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700">
-              {user.role === 'client' ? 'Client' : 'Freelancer'} · Demo
+              {user.role}
             </span>
           </div>
           <Link
@@ -74,30 +77,38 @@ export function UserMenu({ compact = false, dark = false }) {
             className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-ink-600 transition hover:bg-paper"
             role="menuitem"
           >
-            <LayoutDashboard className="h-3.5 w-3.5" /> แดชบอร์ด
+            <LayoutDashboard className="h-3.5 w-3.5" /> {isAdmin ? 'จัดการระบบ' : 'แดชบอร์ด'}
           </Link>
-          <Link
-            to={profilePath}
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-ink-600 transition hover:bg-paper"
-            role="menuitem"
-          >
-            <UserRound className="h-3.5 w-3.5" /> โปรไฟล์ของฉัน
-          </Link>
-          <Link
-            to="/settings"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-ink-600 transition hover:bg-paper"
-            role="menuitem"
-          >
-            <Settings className="h-3.5 w-3.5" /> ตั้งค่า
-          </Link>
+          {!isAdmin && (
+            <>
+              <Link
+                to={`/${user.role}/profile`}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-ink-600 transition hover:bg-paper"
+                role="menuitem"
+              >
+                <UserRound className="h-3.5 w-3.5" /> โปรไฟล์ของฉัน
+              </Link>
+              <Link
+                to="/settings"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-ink-600 transition hover:bg-paper"
+                role="menuitem"
+              >
+                <Settings className="h-3.5 w-3.5" /> ตั้งค่า
+              </Link>
+            </>
+          )}
           <button
             type="button"
             onClick={async () => {
               setOpen(false)
-              await signOut()
-              navigate('/')
+              try {
+                await signOut()
+                navigate('/')
+              } catch (error) {
+                toast.error('ออกจากระบบไม่สำเร็จ', error.message)
+              }
             }}
             className="flex w-full items-center gap-2 border-t border-ink/[0.06] px-4 py-2.5 text-left text-xs font-medium text-rose-600 transition hover:bg-rose-50"
             role="menuitem"

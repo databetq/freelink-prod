@@ -101,16 +101,16 @@ npx hardhat verify --network sepolia <ADDRESS> <ARBITER> <FEE_RECIPIENT> <FEE_BP
 | ฟังก์ชัน | ผู้เรียก | เงื่อนไขหลัก |
 | --- | --- | --- |
 | `depositEscrow` (payable) | client | แนบ `amount + fee` พอดี · deadline ในอนาคตไม่เกิน 1 ปี · `termsHash` ไม่ว่าง |
-| `acceptEscrow` | freelancer | `Funded` · `termsHash` ตรงกับที่ client ผูกไว้ |
+| `acceptEscrow(escrowId, termsHash, expectedAmount, expectedDeadline)` | freelancer | `Funded` · `termsHash` ตรงกับที่ client ผูกไว้ · ค่าจ้างและ deadline ตรงกับที่ฝากจริง (ไม่ตรง → `TermsMismatch`) |
 | `submitWork` | freelancer | `Active` · ก่อน deadline · เริ่มนับช่วงตรวจรับ |
-| `releasePayment` | client | `Active` / `Submitted` |
+| `releasePayment` | client | `Active` / `Submitted` / `Disputed` (ยอมแพ้ระหว่างพิพาท ค่าธรรมเนียมคิดเต็ม) |
 | `requestRevision(escrowId, reason)` | client | `Submitted` และอยู่ในช่วงตรวจรับ → กลับ `Active` · deadline ถูกขยายเป็นอย่างน้อย `now + revisionPeriod` (client ตั้งเองไม่ได้) · ขอได้ไม่เกิน `maxRevisions` ครั้งต่อ escrow (ไม่รีเซ็ตเมื่อส่งซ้ำ) |
 | `claimAfterReview` | freelancer | `Submitted` และพ้นช่วงตรวจรับ (client เงียบ) |
-| `refundClient` | client / freelancer | ก่อน accept ทั้งคู่ทำได้ · freelancer ทำได้ก่อนจบงาน · client ทำได้หลัง deadline ตอน `Active` **และไม่เคยส่งงาน** (เคยส่ง/อยู่ระหว่างแก้งานแล้วต้อง `openDispute`) · คืนเต็มรวมค่าธรรมเนียม |
+| `refundClient` | client / freelancer | ก่อน accept ทั้งคู่ทำได้ · freelancer ทำได้ก่อนจบงาน รวมถึงระหว่างพิพาท (ยอมแพ้) · client ทำได้หลัง deadline ตอน `Active` **และไม่เคยส่งงาน** (เคยส่ง/อยู่ระหว่างแก้งานแล้วต้อง `openDispute`) · คืนเต็มรวมค่าธรรมเนียม |
 | `openDispute(escrowId, reason)` | client / freelancer | client: `Active` หรือ `Submitted` ในช่วงตรวจรับ · freelancer: `Active` ก่อน deadline |
 | `resolveDispute(escrowId, freelancerBps)` | arbiter (snapshot ตอนเปิด) | แบ่งสัดส่วน 0–10000 |
 | `settleExpiredDispute` | client / freelancer | พ้น `arbiterTimeout` → แบ่งครึ่ง |
-| `withdraw` | ผู้มียอดค้าง | เบิกเงินที่โอนไม่สำเร็จ (ผู้รับเป็น contract ที่ปฏิเสธ ETH) |
+| `withdraw` | ผู้มียอดค้าง | เบิกเงินที่โอนไม่สำเร็จ (ผู้รับเป็น contract ที่ปฏิเสธ ETH) · การโอนไม่ copy returndata ผู้รับจึงขวางการจ่ายด้วยการตอบกลับข้อมูลก้อนใหญ่ไม่ได้ |
 | `setFeeBps` / `setArbiter` / `setFeeRecipient` | owner | `feeBps` ≤ 1000 (10%) · มีผลกับ escrow/dispute ใหม่เท่านั้น |
 
 ค่าธรรมเนียม 5% **บวกเพิ่ม** จากค่าจ้าง (client จ่าย 1.05 ETH เมื่อค่าจ้าง 1 ETH) และ snapshot ตอนฝาก

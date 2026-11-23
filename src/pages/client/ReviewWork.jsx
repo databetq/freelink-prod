@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   AlertTriangle,
   CheckCircle2,
-  ExternalLink,
   FileText,
   MessageSquare,
   RotateCcw,
@@ -27,6 +26,8 @@ import { InfoBanner } from '@/components/common/InfoBanner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
 import { PageLoader } from '@/components/common/LoadingSkeleton'
+import { WorkAttachments } from '@/components/projects/WorkAttachments'
+import { WorkLinks } from '@/components/projects/WorkLinks'
 import { escrowStatus, projectStatus } from '@/constants'
 import { formatCurrency, formatDate, timeAgo } from '@/utils/format'
 
@@ -45,6 +46,7 @@ export default function ReviewWork() {
   const [revisionOpen, setRevisionOpen] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [feedbackError, setFeedbackError] = useState('')
+  const [revisionItems, setRevisionItems] = useState([])
   const [busy, setBusy] = useState(false)
 
   if (loading) return <PageLoader />
@@ -65,6 +67,11 @@ export default function ReviewWork() {
   }
 
   const submission = project.submissions?.[0]
+  const checklist = submission?.checklist ?? []
+  const milestone = project.milestones?.find((item) => item.id === submission?.milestoneNumber)
+  const canReview = project.status === 'in_review' && submission?.status === 'pending'
+  const hasRevisionLimit = Number.isInteger(submission?.revisionLimit) && Number.isInteger(submission?.revisionsUsed)
+  const canRequestRevision = canReview && hasRevisionLimit && submission.revisionsUsed < submission.revisionLimit
   const status = projectStatus[project.status]
   const escrow = escrowStatus[project.escrowStatus]
 
@@ -93,13 +100,13 @@ export default function ReviewWork() {
   const approve = async () => {
     setBusy(true)
     try {
-      await projectService.approveSubmission(project.id)
+      await projectService.approveSubmission(project.id, submission.id)
       toast.success(
-        'อนุมัติงานแล้ว (Mock)',
-        'สถานะโครงการและประวัติธุรกรรมถูกอัปเดตในข้อมูลจำลอง — ยังไม่มีการโอนเงินบน blockchain',
+        'อนุมัติงานแล้ว',
+        'ไปที่ Escrow เพื่อปล่อยเงินงวดนี้',
       )
       setConfirmApprove(false)
-      navigate(`/client/projects/${project.id}`)
+      navigate(`/client/projects/${project.id}/escrow`)
     } catch (err) {
       toast.error('อนุมัติไม่สำเร็จ', err.message)
     } finally {
@@ -108,19 +115,32 @@ export default function ReviewWork() {
   }
 
   const requestRevision = async () => {
-    if (feedback.trim().length < 10) {
+    if (!canRequestRevision || busy) return
+    const details = feedback.trim()
+    if (details.length < 10) {
       setFeedbackError('กรุณาอธิบายสิ่งที่ต้องแก้ไขอย่างน้อย 10 ตัวอักษร')
+      return
+    }
+    const selected = checklist.filter((_, index) => revisionItems.includes(index))
+    const message = selected.length ? `รายการที่ยังไม่ผ่าน\n${selected.map((item) => `- ${item}`).join('\n')}\n\n${details}` : details
+    if (message.length > 5000) {
+      setFeedbackError('รายการที่เลือกและรายละเอียดรวมกันต้องไม่เกิน 5,000 ตัวอักษร')
       return
     }
     setBusy(true)
     try {
-      await projectService.requestRevision(project.id, feedback.trim())
-      toast.success('ส่งคำขอแก้ไขแล้ว', 'ฟรีแลนซ์จะเห็น feedback ในหน้าโครงการ (ข้อมูลจำลอง)')
+      await projectService.requestRevision(project.id, submission.id, message)
+      toast.success('ส่งคำขอแก้ไขแล้ว', 'ฟรีแลนซ์จะเห็นข้อเสนอแนะในหน้าโครงการ')
       setRevisionOpen(false)
       setFeedback('')
+      setRevisionItems([])
       navigate(`/client/projects/${project.id}`)
     } catch (err) {
       toast.error('ส่งคำขอแก้ไขไม่สำเร็จ', err.message)
+      if (err.code === 'WORK_REVISION_LIMIT_REACHED') {
+        setRevisionOpen(false)
+        refresh()
+      }
     } finally {
       setBusy(false)
     }
@@ -170,69 +190,37 @@ export default function ReviewWork() {
                 {submission.description}
               </p>
 
-              {submission.link && (
-                <a
-                  href={submission.link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-flex items-center gap-2 rounded-xl border border-ink/10 bg-white px-3.5 py-2.5 text-xs font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-50"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  เปิดลิงก์ผลงาน
-                  <span className="max-w-[240px] truncate font-normal text-ink-400">
-                    {submission.link}
-                  </span>
-                </a>
-              )}
+              <WorkLinks submission={submission} />
 
-              {submission.files?.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">ไฟล์แนบ</p>
-                  <ul className="mt-2 space-y-1.5">
-                    {submission.files.map((file) => (
-                      <li
-                        key={file}
-                        className="flex items-center gap-2 rounded-lg border border-ink/[0.07] bg-white px-3 py-2 text-[11.5px] text-ink-600"
-                      >
-                        <FileText className="h-3.5 w-3.5 text-brand-600" />
-                        {file}
-                        <span className="ml-auto text-[10px] text-ink-400">mock file</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <WorkAttachments projectId={project.id} files={submission.files} />
 
               {submission.feedback && (
                 <div className="mt-4 rounded-xl border border-ink/[0.07] bg-paper px-4 py-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">
                     Feedback ล่าสุด
                   </p>
-                  <p className="mt-1 text-[12px] leading-relaxed text-ink-600">{submission.feedback}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-ink-600">{submission.feedback}</p>
                 </div>
               )}
             </div>
           </section>
 
           <section className="card p-5">
-            <h2 className="text-sm font-bold">ตรวจสอบก่อนอนุมัติ</h2>
-            <ul className="mt-3 space-y-2">
-              {[
-                'งานตรงกับขอบเขตและ deliverables ที่ตกลงไว้',
-                'ไฟล์และลิงก์เปิดได้และเป็นเวอร์ชันล่าสุด',
-                'งานผ่านการทดสอบบนอุปกรณ์ที่ต้องการ',
-                'ไม่มีรายการที่ยังค้างจากการขอแก้ไขครั้งก่อน',
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-2 text-[12px] leading-relaxed text-ink-600">
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                  {item}
-                </li>
-              ))}
-            </ul>
+            <h2 className="text-sm font-bold">รายการตรวจรับ{milestone && ` งวด ${milestone.id} · ${milestone.title}`}</h2>
+            {checklist.length > 0 ? (
+              <ul className="mt-3 list-disc space-y-2 break-words pl-5 text-[12px] leading-relaxed text-ink-600">
+                {checklist.map((item, index) => <li key={index}>{item}</li>)}
+              </ul>
+            ) : <p className="mt-2 text-xs text-ink-600">ตรวจงานจากขอบเขตที่ตกลงกันและไฟล์หรือลิงก์ของงานที่ส่ง</p>}
           </section>
 
-          <section className="card p-5">
+          {canReview && <section className="card p-5">
             <h2 className="text-sm font-bold">การตัดสินใจ</h2>
+            {hasRevisionLimit && (
+              <p className="mt-2 text-sm text-ink-600">
+                ขอแก้ไปแล้ว {submission.revisionsUsed} จาก {submission.revisionLimit} รอบตามข้อตกลง
+              </p>
+            )}
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <Button
                 variant="brand"
@@ -247,17 +235,22 @@ export default function ReviewWork() {
                 variant="secondary"
                 size="md"
                 icon={RotateCcw}
+                disabled={!canRequestRevision}
                 onClick={() => setRevisionOpen(true)}
                 className="w-full"
               >
                 ขอแก้ไขงาน
               </Button>
             </div>
-            <InfoBanner tone="warning" className="mt-3" title="ยังไม่มีการโอนเงินจริง">
-              การอนุมัติจะอัปเดตสถานะโครงการและธุรกรรมใน mock data เท่านั้น
-              การปล่อยเงินบน blockchain ต้องรอ ABI / Contract Address และการยืนยันจาก Wallet
-            </InfoBanner>
-          </section>
+            {!canRequestRevision && hasRevisionLimit && (
+              <div className="mt-3">
+                <InfoBanner tone="warning">หากงานยังไม่ผ่านรายการตรวจรับ คุณสามารถแจ้งทีมให้ตรวจหลักฐานได้</InfoBanner>
+                <Button to={`/help?projectId=${project.id}#contact`} variant="ghost" size="sm" className="mt-2">
+                  แจ้งปัญหาโครงการ
+                </Button>
+              </div>
+            )}
+          </section>}
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-[88px] lg:self-start">
@@ -288,7 +281,7 @@ export default function ReviewWork() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-ink-500">กำหนดส่ง</span>
-                <span className="font-semibold text-ink">{formatDate(project.dueDate)}</span>
+                <span className="font-semibold text-ink">{formatDate(milestone ? milestone.dueDate : project.dueDate)}</span>
               </div>
             </div>
             <div className="mt-4 space-y-2">
@@ -299,17 +292,6 @@ export default function ReviewWork() {
                 คุยกับฟรีแลนซ์
               </Button>
             </div>
-          </div>
-
-          <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              Mock review flow
-            </div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-amber-800/80">
-              ข้อมูลงานส่งและ feedback เป็นข้อมูลจำลอง หากต้องการตรวจสอบซ้ำ ให้ refresh หน้า
-              ระบบจะโหลดจาก mock database
-            </p>
           </div>
 
           <div className="flex items-center gap-2 rounded-xl border border-ink/[0.07] bg-white px-3.5 py-3 text-[10.5px] text-ink-500">
@@ -324,9 +306,9 @@ export default function ReviewWork() {
         onClose={() => setConfirmApprove(false)}
         onConfirm={approve}
         loading={busy}
-        title="อนุมัติงานและปิดโครงการ?"
-        description="สถานะโครงการจะเปลี่ยนเป็น “เสร็จสิ้น” และบันทึกธุรกรรมตัวอย่างใน mock data — การโอนเงินจริงยังไม่เกิดขึ้นจนกว่าจะเชื่อมต่อ Smart Contract"
-        confirmLabel="อนุมัติงาน (Mock)"
+        title="อนุมัติงานงวดนี้?"
+        description="ยืนยันผลการตรวจรับงาน แล้วไปที่หน้า Escrow เพื่อดำเนินการจ่ายเงิน"
+        confirmLabel="อนุมัติงาน"
         tone="brand"
       />
 
@@ -346,9 +328,25 @@ export default function ReviewWork() {
           </>
         }
       >
+        {checklist.length > 0 && (
+          <fieldset className="mb-4 space-y-2 text-sm">
+            <legend className="mb-2 font-semibold">เลือกข้อที่ยังไม่ผ่าน (ถ้ามี)</legend>
+            {checklist.map((item, index) => (
+              <label key={index} className="flex items-start gap-2 break-words">
+                <input type="checkbox" className="mt-1" checked={revisionItems.includes(index)} onChange={(event) => {
+                  const checked = event.target.checked
+                  setRevisionItems((items) => checked ? [...items, index] : items.filter((value) => value !== index))
+                  setFeedbackError('')
+                }} />
+                <span>{item}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
         <Textarea
           label="รายละเอียดที่ต้องแก้ไข"
           rows={5}
+          maxLength={5000}
           value={feedback}
           onChange={(event) => {
             setFeedback(event.target.value)

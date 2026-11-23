@@ -95,7 +95,7 @@ export default function BrowseJobs() {
           <PageHeader
             eyebrow="Browse opportunities"
             title="ค้นหางานที่ใช่สำหรับคุณ"
-            description="กรองตามหมวดหมู่ งบประมาณ และประเภทงาน — ทุกประกาศในหน้านี้เป็นข้อมูลจำลองสำหรับทดสอบการค้นหา"
+            description="กรองตามหมวดหมู่ งบประมาณ และประเภทงาน"
           />
           <div className="max-w-2xl">
             <SearchBar
@@ -182,7 +182,7 @@ export default function BrowseJobs() {
               <EmptyState
                 icon={SearchX}
                 title="ไม่พบงานที่ตรงกับเงื่อนไข"
-                description="ลองลดตัวกรอง เปลี่ยนหมวดหมู่ หรือค้นหาด้วยคำอื่น — ข้อมูลตัวอย่างมีอยู่หลายหมวดให้ทดลอง"
+                description="ลองลดตัวกรอง เปลี่ยนหมวดหมู่ หรือค้นหาด้วยคำอื่น"
                 action={
                   <Button variant="secondary" onClick={resetFilters}>
                     ล้างตัวกรองทั้งหมด

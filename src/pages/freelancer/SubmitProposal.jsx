@@ -73,8 +73,8 @@ export default function SubmitProposal() {
         attachments: files.map((file) => file.name),
       })
       toast.success(
-        'ส่งข้อเสนอแล้ว (Mock)',
-        'ข้อเสนอถูกบันทึกใน mock database — ยังไม่ถูกส่งถึงลูกค้าจริง',
+        'ส่งข้อเสนอแล้ว',
+        'ผู้ว่าจ้างสามารถดูข้อเสนอของคุณได้',
       )
       navigate('/freelancer/proposals')
     } catch (err) {
@@ -215,10 +215,6 @@ export default function SubmitProposal() {
             </div>
           </section>
 
-          <InfoBanner tone="warning" title="ข้อเสนอเป็นข้อมูลจำลอง">
-            การส่งข้อเสนอจะบันทึกใน mock database ของเบราว์เซอร์
-            ไม่มีการแจ้งเตือนหรือส่งข้อมูลถึงลูกค้าจริง — การเชื่อม Backend จะทำให้ flow นี้สมบูรณ์
-          </InfoBanner>
 
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => navigate(-1)} disabled={busy}>

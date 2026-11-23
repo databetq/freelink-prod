@@ -5,15 +5,16 @@ import { Sidebar } from '@/components/layout/Sidebar'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { Logo } from '@/components/layout/Logo'
 import { NotificationBell } from '@/components/layout/NotificationBell'
+import { AccountWarnings } from '@/components/layout/AccountWarnings'
 import { UserMenu } from '@/components/layout/UserMenu'
 import { WalletConnectButton } from '@/components/wallet/WalletConnectButton'
 import { PageTransition } from '@/components/layout/PageTransition'
 import { useAuth } from '@/contexts/AuthContext'
-import { clientNav, freelancerNav, sharedNav } from '@/constants'
+import { dashboardNavigation } from '@/constants'
 
 export function DashboardLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const { role } = useAuth()
+  const { role, user } = useAuth()
   const location = useLocation()
 
   useEffect(() => {
@@ -21,14 +22,16 @@ export function DashboardLayout() {
     window.scrollTo({ top: 0, behavior: 'instant' })
   }, [location.pathname])
 
-  const nav = [...(role === 'client' ? clientNav : freelancerNav), ...sharedNav]
-  const active = nav.find((item) => item.to !== '/admin' && location.pathname.startsWith(item.to))
+  const navigation = dashboardNavigation[role]
+  const active = navigation?.sections.flatMap(({ items }) => items).find(
+    ({ to }) => location.pathname === to || location.pathname.startsWith(`${to}/`),
+  )
   const title =
     location.pathname.includes('/jobs/new')
       ? 'สร้างประกาศงาน'
       : location.pathname.includes('/edit')
         ? 'แก้ไขประกาศงาน'
-        : active?.label || 'Workspace'
+        : active?.label || navigation?.workspace || 'Workspace'
 
   return (
     <div className="min-h-screen bg-paper">
@@ -61,24 +64,28 @@ export function DashboardLayout() {
               </div>
               <div className="hidden min-w-0 lg:block">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">
-                  Freelink workspace
+                  {navigation?.workspace}
                 </p>
                 <h2 className="truncate text-sm font-bold text-ink">{title}</h2>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Link
-                to={role === 'freelancer' ? '/freelancer/jobs' : '/client/jobs'}
-                className="hidden h-9 w-9 items-center justify-center rounded-lg border border-ink/10 bg-white text-ink-500 transition hover:border-brand-300 hover:text-brand-700 sm:flex"
-                aria-label="ค้นหางาน"
-              >
-                <Search className="h-4 w-4" />
-              </Link>
-              <NotificationBell />
-              <div className="hidden sm:block">
-                <WalletConnectButton size="sm" />
-              </div>
+              {navigation?.marketplaceTools && (
+                <>
+                  <Link
+                    to={`/${role}/jobs`}
+                    className="hidden h-9 w-9 items-center justify-center rounded-lg border border-ink/10 bg-white text-ink-500 transition hover:border-brand-300 hover:text-brand-700 sm:flex"
+                    aria-label="ค้นหางาน"
+                  >
+                    <Search className="h-4 w-4" />
+                  </Link>
+                  <NotificationBell />
+                  <div className="hidden sm:block">
+                    <WalletConnectButton size="sm" />
+                  </div>
+                </>
+              )}
               <UserMenu compact />
             </div>
           </div>
@@ -86,6 +93,7 @@ export function DashboardLayout() {
 
         <main id="dashboard-content" className="px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
           <div className="mx-auto w-full max-w-[1160px]">
+            {navigation?.marketplaceTools && <AccountWarnings key={user.id} userId={user.id} />}
             <PageTransition>
               <Outlet />
             </PageTransition>

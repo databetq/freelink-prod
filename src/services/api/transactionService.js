@@ -1,26 +1,19 @@
-import { appConfig } from '@/config/appConfig'
-import * as mock from '@/services/mocks/mockTransactionService'
 import { apiClient, assertApiConfigured } from './apiClient'
 import { endpoints } from './endpoints'
 
+function withHash(transaction) {
+  return { ...transaction, hash: transaction.txHash ?? transaction.hash }
+}
+
 export const transactionService = {
   list(userId) {
-    if (appConfig.useMockApi) return mock.listTransactions(userId)
     assertApiConfigured()
-    return apiClient.get(endpoints.transactions.list, { params: { userId } }).then((r) => r.data)
+    return apiClient.get(endpoints.transactions.list, { params: { userId } }).then(({ data }) => data.map(withHash))
   },
 
   getById(id) {
-    if (appConfig.useMockApi) return mock.getTransaction(id)
     assertApiConfigured()
-    return apiClient.get(endpoints.transactions.detail(id)).then((r) => r.data)
+    return apiClient.get(endpoints.transactions.detail(id)).then(({ data }) => withHash(data))
   },
 
-  requestWithdrawal(userId, amount) {
-    if (appConfig.useMockApi) return mock.requestWithdrawal(userId, amount)
-    assertApiConfigured()
-    return apiClient
-      .post(endpoints.transactions.withdraw, { userId, amount })
-      .then((r) => r.data)
-  },
 }
