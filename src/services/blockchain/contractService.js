@@ -195,8 +195,8 @@ export async function acceptEscrow({ escrowId, freelancerAddress, termsHash, exp
 }
 
 /** freelancer: workHash = keccak256 of the off-chain link/file. */
-export async function submitWork({ escrowId, workHash }) {
-  const contract = await getSignerContract()
+export async function submitWork({ escrowId, workHash, address }) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('submitWork')](escrowId, workHash)
 }
 
@@ -207,30 +207,35 @@ export async function releasePayment({ escrowId, clientAddress }) {
 }
 
 /** client asks for changes (reason is stored on-chain permanently — no personal data). */
-export async function requestRevision({ escrowId, reason }) {
-  const contract = await getSignerContract()
+export async function requestRevision({ escrowId, reason, address }) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('requestRevision')](escrowId, reason)
 }
 
 /** freelancer collects payment after the review period ended without client action. */
-export async function claimAfterReview({ escrowId }) {
-  const contract = await getSignerContract()
+export async function claimAfterReview({ escrowId, address }) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('claimAfterReview')](escrowId)
 }
 
-export async function refundClient({ escrowId }) {
-  const contract = await getSignerContract()
+export async function refundClient({ escrowId, address }) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('refundClient')](escrowId)
 }
 
 /** reason is stored on-chain permanently — no personal data. */
-export async function openDispute({ escrowId, reason }) {
-  const contract = await getSignerContract()
+export async function openDispute({ escrowId, reason, address }) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('openDispute')](escrowId, reason)
 }
 
-export async function settleExpiredDispute({ escrowId }) {
-  const contract = await getSignerContract()
+export async function resolveDispute({ escrowId, freelancerBps, address }) {
+  const contract = await getSignerContract(address)
+  return contract[requireMethod('resolveDispute')](escrowId, freelancerBps)
+}
+
+export async function settleExpiredDispute({ escrowId, address }) {
+  const contract = await getSignerContract(address)
   return contract[requireMethod('settleExpiredDispute')](escrowId)
 }
 

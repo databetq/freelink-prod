@@ -18,11 +18,15 @@ import { useAsync } from '@/hooks/useAsync'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { transactionService } from '@/services/api/transactionService'
 import { getNativeBalance } from '@/services/blockchain/walletService'
+import { formatEther } from 'ethers'
+import { readPendingWithdrawal, withdraw } from '@/services/blockchain/contractService'
+import { executeTransaction } from '@/services/blockchain/transactionService'
 import { contractConfig, getMissingContractConfig, isContractConfigured } from '@/config/contractConfig'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/common/Button'
 import { WalletConnectButton } from '@/components/wallet/WalletConnectButton'
 import { WalletLinkPanel } from '@/components/wallet/WalletLinkPanel'
+import { TransactionStatus } from '@/components/wallet/TransactionStatus'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -34,7 +38,7 @@ import { cn } from '@/utils/cn'
 
 export default function WalletPage() {
   useDocumentTitle('กระเป๋าเงิน')
-  const { user } = useAuth()
+  const { user, role } = useAuth()
   const wallet = useWallet()
   const toast = useToast()
   const { data, loading, error, refresh } = useAsync(
@@ -46,6 +50,16 @@ export default function WalletPage() {
 
   const missing = getMissingContractConfig()
   const configured = isContractConfigured()
+  const withdrawalAddress = configured && wallet.isConnected && wallet.chainId === contractConfig.chainId ? wallet.address : null
+  const { data: withdrawal, loading: withdrawalLoading, error: withdrawalError, refresh: refreshWithdrawal } = useAsync(
+    async () => withdrawalAddress ? { address: withdrawalAddress, amount: await readPendingWithdrawal(withdrawalAddress) } : null,
+    [withdrawalAddress],
+  )
+  const pendingWithdrawal = withdrawal?.address === withdrawalAddress ? withdrawal.amount : 0n
+  const [withdrawalTx, setWithdrawalTx] = useState(null)
+  const [withdrawing, setWithdrawing] = useState(false)
+  const projectsPath = role === 'freelancer' ? '/freelancer/projects' : '/client/projects'
+  const historyPath = role === 'freelancer' ? '/freelancer/transactions' : '/client/history'
   const hasEscrowEvents = contractConfig.abi.some(
     (entry) => entry.type === 'event' && entry.name === 'EscrowFunded',
   )
@@ -63,6 +77,17 @@ export default function WalletPage() {
     }
   }, [wallet.isConnected, wallet.address, wallet.chainId])
 
+  async function submitWithdrawal() {
+    if (withdrawing || !withdrawalAddress || pendingWithdrawal <= 0n) return
+    setWithdrawing(true)
+    try {
+      await executeTransaction(() => withdraw(withdrawalAddress), { onStatus: setWithdrawalTx })
+      await refreshWithdrawal()
+    } finally {
+      setWithdrawing(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -77,6 +102,22 @@ export default function WalletPage() {
         {wallet.isWrongNetwork ? ` กรุณาสลับไป ${contractConfig.chainName}` : ''}
         {configured && !wallet.isWrongNetwork && ` ตั้งค่า Escrow สำหรับ ${contractConfig.chainName} แล้ว`}
       </InfoBanner>
+
+      {withdrawalAddress && (
+        <section className="card mb-5 space-y-2 p-5">
+          <h2 className="text-sm font-bold">ยอดรอถอนจาก Escrow</h2>
+          {withdrawalError ? (
+            <InfoBanner tone="warning">{withdrawalError.message} <Button onClick={refreshWithdrawal} variant="ghost" size="sm">ลองอีกครั้ง</Button></InfoBanner>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm">{withdrawalLoading ? 'กำลังอ่านยอด…' : `${formatEther(pendingWithdrawal)} ETH`}</p>
+              {pendingWithdrawal > 0n && <Button size="sm" loading={withdrawing} disabled={withdrawalLoading} onClick={submitWithdrawal}>ถอนเข้า Wallet</Button>}
+              <Button variant="ghost" size="sm" onClick={refreshWithdrawal} disabled={withdrawalLoading || withdrawing}>อัปเดตยอด</Button>
+            </div>
+          )}
+          {withdrawalTx && <TransactionStatus {...withdrawalTx} />}
+        </section>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-4">
@@ -184,7 +225,7 @@ export default function WalletPage() {
           <section className="card p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold">ประวัติธุรกรรมล่าสุด</h2>
-              <Link to="/freelancer/transactions" className="text-[10.5px] font-semibold text-brand-700 hover:underline">
+              <Link to={historyPath} className="text-[10.5px] font-semibold text-brand-700 hover:underline">
                 ดูทั้งหมด →
               </Link>
             </div>
@@ -281,19 +322,19 @@ export default function WalletPage() {
             <h2 className="text-sm font-bold">ลิงก์ที่เกี่ยวข้อง</h2>
             <div className="mt-3 space-y-1">
               <Link
-                to="/client/projects"
+                to={projectsPath}
                 className="flex items-center justify-between rounded-lg px-3 py-2.5 text-[11.5px] font-medium text-ink-600 transition hover:bg-paper"
               >
                 โครงการและ Escrow
                 <ExternalLink className="h-3.5 w-3.5 text-ink-300" />
               </Link>
-              <Link
+              {role === 'freelancer' && <Link
                 to="/freelancer/earnings"
                 className="flex items-center justify-between rounded-lg px-3 py-2.5 text-[11.5px] font-medium text-ink-600 transition hover:bg-paper"
               >
                 รายได้ของฉัน
                 <ExternalLink className="h-3.5 w-3.5 text-ink-300" />
-              </Link>
+              </Link>}
               <a
                 href="https://docs.ethers.org/v6/"
                 target="_blank"

@@ -13,6 +13,12 @@ import { CardSkeleton } from '@/components/common/LoadingSkeleton'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { Button } from '@/components/common/Button'
 
+const projectTabs = {
+  ongoing: ['active', 'revision', 'disputed'],
+  in_review: ['in_review'],
+  completed: ['completed', 'resolved', 'cancelled'],
+}
+
 export default function ActiveProjects() {
   const { role, profileId } = useAuth()
   useDocumentTitle('โครงการ')
@@ -23,21 +29,10 @@ export default function ActiveProjects() {
   const [tab, setTab] = useState('ongoing')
 
   const projects = data || []
-  const counts = useMemo(
-    () => ({
-      ongoing: projects.filter((project) => ['active', 'revision'].includes(project.status)).length,
-      in_review: projects.filter((project) => project.status === 'in_review').length,
-      completed: projects.filter((project) => project.status === 'completed').length,
-      all: projects.length,
-    }),
-    [projects],
-  )
-
-  const filtered = useMemo(() => {
-    if (tab === 'ongoing') return projects.filter((project) => ['active', 'revision'].includes(project.status))
-    if (tab === 'all') return projects
-    return projects.filter((project) => project.status === tab)
-  }, [projects, tab])
+  const groups = useMemo(() => Object.fromEntries(Object.entries(projectTabs).map(([name, statuses]) => [
+    name, projects.filter((project) => statuses.includes(project.status)),
+  ])), [projects])
+  const filtered = tab === 'all' ? projects : groups[tab]
 
   return (
     <div>
@@ -68,10 +63,10 @@ export default function ActiveProjects() {
         onChange={setTab}
         className="mb-5"
         items={[
-          { value: 'ongoing', label: 'กำลังดำเนินการ', count: counts.ongoing },
-          { value: 'in_review', label: 'รอตรวจรับ', count: counts.in_review },
-          { value: 'completed', label: 'เสร็จสิ้น', count: counts.completed },
-          { value: 'all', label: 'ทั้งหมด', count: counts.all },
+          { value: 'ongoing', label: 'กำลังดำเนินการ', count: groups.ongoing.length },
+          { value: 'in_review', label: 'รอตรวจรับ', count: groups.in_review.length },
+          { value: 'completed', label: 'ปิดแล้ว', count: groups.completed.length },
+          { value: 'all', label: 'ทั้งหมด', count: projects.length },
         ]}
       />
 

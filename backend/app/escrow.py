@@ -9,15 +9,18 @@ import httpx
 from eth_abi.exceptions import DecodingError
 from fastapi import APIRouter, Depends, Response
 from pydantic import Field, PositiveInt, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentIdentity, Db, trusted_origin
 from app.config import get_settings
 from app.errors import api_error
-from app.escrow_chain import EVENTS, FUNDED, REFUNDED, RELEASED, RESOLVED, EscrowChain, escrow_id, hex_hash
-from app.marketplace import close_paid_job, get_job, plan_released, require_owner
+from app.escrow_chain import (
+    DEFERRED, EVENTS, FUNDED, LIFECYCLE, REFUNDED, RELEASED, RESOLVED, SUBMITTED, EscrowChain, escrow_id, hex_hash,
+)
+from app.marketplace import get_job, plan_released, require_owner, submission_history
 from app.models import EscrowAgreement, EscrowTransaction, Profile, Project, Proposal, WalletLink, WorkSubmission
+from app.project_state import CLOSED, apply_escrow_event
 from app.schemas import ApiModel, PositiveMoney
 
 router = APIRouter(prefix="/projects/{project_id}/escrow", tags=["escrow"])
@@ -29,8 +32,9 @@ TOS = (
     "ทั้งสองฝ่ายตรวจงานตามรายการที่ตกลงกันและใช้ช่องทางข้อพิพาทของสัญญาเมื่อจำเป็น "
     "สิทธิ์ในงานโอนเมื่อชำระค่าจ้างครบตามข้อตกลง และห้ามเผยแพร่งานที่ระบุว่าเป็นความลับ"
 )
-MIN_DEADLINE_DAYS = 7
 SECONDS_PER_DAY = 86400
+MAX_PENDING_TRANSACTIONS = 5
+SETTLED = {FUNDED: "funded", RELEASED: "released", REFUNDED: "refunded", RESOLVED: "resolved"}
 Hash = Annotated[str, StringConstraints(pattern=r"^0x[0-9a-fA-F]{64}$")]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
@@ -71,12 +75,21 @@ class AgreementView(ApiModel):
     transactions: list[TxView]
 
 
+class EscrowSubmissionView(ApiModel):
+    id: UUID
+    status: str
+    work_hash: str
+    revisions_used: int
+
+
 class EscrowView(ApiModel):
     agreements: list[AgreementView]
+    latest_submissions: dict[UUID, EscrowSubmissionView]
+    project_status: str
     approved_agreement_ids: list[UUID]
     deliverables: list[str]
     proposed_delivery_days: int
-    min_deadline_days: int = MIN_DEADLINE_DAYS
+    min_deadline_minutes: int
     tos_version: str = TOS_VERSION
     tos_text: str = TOS
 
@@ -138,14 +151,31 @@ def get_agreement(db: Session, project_id: UUID, agreement_id: UUID, *, lock: bo
 @router.get("", response_model=EscrowView)
 def read_escrow(project_id: UUID, db: Db, identity: CurrentIdentity):
     project = project_access(db, project_id, identity)
+    latest = {}
+    for submission in submission_history(db, [project_id])[project_id]:
+        if submission.agreement_id not in latest:
+            latest[submission.agreement_id] = EscrowSubmissionView(
+                id=submission.id, status=submission.status, revisions_used=submission.revisions_used,
+                work_hash=submission.work_hash or hex_hash(str(submission.id).encode()),
+            )
     return EscrowView(
         agreements=[agreement_view(db, item) for item in project_agreements(db, project_id)],
+        latest_submissions=latest,
+        project_status=project.status,
         approved_agreement_ids=list(db.scalars(select(WorkSubmission.agreement_id).where(
             WorkSubmission.project_id == project_id, WorkSubmission.status == "approved",
         ).distinct())),
         deliverables=get_job(db, project.job_id).deliverables,
         proposed_delivery_days=db.get(Proposal, project.proposal_id).delivery_days,
+        min_deadline_minutes=get_settings().escrow_min_deadline_minutes,
     )
+
+
+def duration_text(minutes: int) -> str:
+    for size, unit in ((1440, "วัน"), (60, "ชั่วโมง")):
+        if minutes % size == 0:
+            return f"{minutes // size} {unit}"
+    return f"{minutes} นาที"
 
 
 def build_milestones(payload: PrepareRequest, project: Project, deliverables: list[str]) -> list[dict]:
@@ -185,7 +215,7 @@ def prepare(project_id: UUID, payload: PrepareRequest, db: Db, identity: Current
     current = latest.get(number)
     if current is not None and current.status not in ("refunded", "expired"):
         return agreement_view(db, current)
-    if project.status in ("cancelled", "completed"):
+    if project.status in (*CLOSED, "completed"):
         raise api_error(409, "ESCROW_PROJECT_CLOSED", "โปรเจกต์นี้ปิดแล้ว")
     if number > 1 and (number - 1 not in latest or latest[number - 1].status != "released"):
         raise api_error(409, "ESCROW_MILESTONE_LOCKED", "ต้องยืนยันการจ่ายงวดก่อนหน้าก่อนเตรียมงวดถัดไป")
@@ -227,14 +257,16 @@ def prepare(project_id: UUID, payload: PrepareRequest, db: Db, identity: Current
         latest_block = chain.block("latest")
         timestamp = int(latest_block["timestamp"], 16)
         arbiter, revisions, max_duration = chain.policy(contract)
+        min_lead = settings.escrow_min_deadline_minutes * 60
         if deadline is None:
             proposed_days = db.get(Proposal, project.proposal_id).delivery_days
-            deadline = timestamp + max(proposed_days, MIN_DEADLINE_DAYS) * SECONDS_PER_DAY
-        if not timestamp + MIN_DEADLINE_DAYS * SECONDS_PER_DAY <= deadline <= timestamp + max_duration:
+            deadline = timestamp + max(proposed_days * SECONDS_PER_DAY, min_lead)
+        if not timestamp + min_lead <= deadline <= timestamp + max_duration:
             if original and payload.deadline is None:
                 raise api_error(422, "ESCROW_PLANNED_DEADLINE", "กำหนดส่งตามแผนใช้กับรอบนี้ไม่ได้ กรุณาเลือกวันและเวลาส่งงานใหม่")
             raise api_error(422, "ESCROW_DEADLINE",
-                            f"กำหนดส่งต้องห่างอย่างน้อย {MIN_DEADLINE_DAYS} วัน และไม่เกินระยะเวลาที่สัญญารองรับ")
+                            f"กำหนดส่งต้องห่างอย่างน้อย {duration_text(settings.escrow_min_deadline_minutes)} "
+                            "และไม่เกินระยะเวลาที่สัญญารองรับ")
         if arbiter in (client, freelancer):
             raise api_error(409, "ESCROW_ARBITER_CONFLICT", "Wallet ของคู่สัญญาต้องต่างจาก Wallet ผู้ตัดสิน")
         if not items and chain.is_occupied(contract, escrow_id(client, hex_hash(str(project.id).encode()))):
@@ -268,6 +300,8 @@ def prepare(project_id: UUID, payload: PrepareRequest, db: Db, identity: Current
 def accept_terms(project_id: UUID, payload: ConsentRequest, db: Db, identity: CurrentIdentity):
     project = project_access(db, project_id, identity)
     require_owner(identity, project.client_id)
+    if project.status in (*CLOSED, "completed"):
+        raise api_error(409, "ESCROW_PROJECT_CLOSED", "โปรเจกต์นี้ปิดแล้ว")
     agreement = get_agreement(db, project_id, payload.agreement_id, lock=True)
     terms = json.loads(agreement.terms_json)
     if payload.terms_hash.lower() != agreement.terms_hash or payload.tos_version != terms["tosVersion"]:
@@ -290,6 +324,9 @@ def receipt_event(agreement: EscrowAgreement, receipt: dict) -> tuple | None:
         event = EVENTS.get(topics[0].lower())
         if event is None:
             continue
+        # Revision and dispute reasons are arbitrary bytes on-chain and are not needed for sync.
+        if event in LIFECYCLE and event != SUBMITTED:
+            return event, log, 0, 0
         _, *values = event.decode(log)
         if event == FUNDED:
             key, client, freelancer, amount, fee, deadline, terms_hash = values
@@ -301,6 +338,10 @@ def receipt_event(agreement: EscrowAgreement, receipt: dict) -> tuple | None:
             freelancer, amount, fee = values
             if freelancer == terms["freelancer"] and amount == int(terms["amountWei"]):
                 return event, log, amount, fee
+        elif event == SUBMITTED:
+            freelancer, _, _ = values
+            if freelancer == terms["freelancer"]:
+                return event, log, 0, 0
         elif event == REFUNDED:
             client, amount = values
             if client == terms["client"]:
@@ -309,6 +350,13 @@ def receipt_event(agreement: EscrowAgreement, receipt: dict) -> tuple | None:
             _, amount, _, fee, _ = values
             return event, log, amount, fee
     return None
+
+
+def deferred_roles(agreement: EscrowAgreement, receipt: dict) -> set[str]:
+    terms = json.loads(agreement.terms_json)
+    payees = {"0x" + log["topics"][1][-40:].lower() for log in receipt["logs"]
+              if log["address"].lower() == agreement.contract_address and log["topics"][0].lower() == DEFERRED.topic}
+    return {role for role in ("client", "freelancer") if terms[role] in payees}
 
 
 @router.get("/release-progress", response_model=ReleaseProgress)
@@ -349,7 +397,8 @@ def get_transaction(db: Session, agreement: EscrowAgreement, tx_hash: str) -> Es
     return tx
 
 
-def reconcile(db: Session, chain: EscrowChain, agreement: EscrowAgreement, tx: EscrowTransaction, finalized: dict) -> None:
+def reconcile(db: Session, chain: EscrowChain, agreement: EscrowAgreement, tx: EscrowTransaction,
+              finalized: dict, *, scanning: bool = False) -> None:
     if tx.status != "pending":
         return
     receipt = chain.call("eth_getTransactionReceipt", tx.tx_hash)
@@ -373,6 +422,8 @@ def reconcile(db: Session, chain: EscrowChain, agreement: EscrowAgreement, tx: E
         event, log, amount, fee = matched
         if event != FUNDED and agreement.status == "prepared":
             return  # Wait for the funding event to be processed before its settlement.
+        if event == REFUNDED and not scanning and block_number >= agreement.next_scan_block:
+            return  # Scan in order so a preceding DisputeOpened can close the project on refund.
         if event == FUNDED and agreement.client_consented_at is None:
             tx.status, tx.error = "rejected", "ESCROW_CONSENT_REQUIRED"
             return
@@ -382,10 +433,17 @@ def reconcile(db: Session, chain: EscrowChain, agreement: EscrowAgreement, tx: E
         tx.block_number, tx.block_hash = block_number, receipt["blockHash"].lower()
         tx.confirmed_at = datetime.fromtimestamp(int(block["timestamp"], 16), timezone.utc)
         tx.amount_wei, tx.fee_wei = str(amount), str(fee)
+        if event == SUBMITTED:
+            _, _, work_hash, review_ends_at = event.decode(log)
+            submission = db.scalar(select(WorkSubmission).where(
+                WorkSubmission.agreement_id == agreement.id, WorkSubmission.work_hash == "0x" + work_hash.hex(),
+            ))
+            if submission is not None:
+                submission.chain_submitted_at = tx.confirmed_at
+                submission.chain_review_ends_at = datetime.fromtimestamp(review_ends_at, timezone.utc)
         if agreement.status in ("prepared", "funded"):
-            agreement.status = {FUNDED: "funded", RELEASED: "released", REFUNDED: "refunded", RESOLVED: "resolved"}[event]
-        if event == RELEASED:
-            close_paid_job(db, agreement.project_id)
+            agreement.status = SETTLED.get(event, agreement.status)
+            apply_escrow_event(db, agreement, event, deferred_roles(agreement, receipt))
     except (KeyError, TypeError, ValueError, DecodingError):
         raise api_error(503, "ESCROW_RPC_UNAVAILABLE", "ข้อมูลธุรกรรมจาก RPC ไม่ครบ กรุณาลองใหม่") from None
 
@@ -396,6 +454,10 @@ def submit_transaction(project_id: UUID, payload: TransactionRequest, response: 
     project_access(db, project_id, identity)
     agreement = get_agreement(db, project_id, payload.agreement_id, lock=True)
     tx_hash = payload.tx_hash.lower()
+    hashes = db.scalars(select(EscrowTransaction.tx_hash).where(
+        EscrowTransaction.agreement_id == agreement.id, EscrowTransaction.status == "pending")).all()
+    if tx_hash not in hashes and len(hashes) >= MAX_PENDING_TRANSACTIONS:
+        raise api_error(429, "ESCROW_TOO_MANY_PENDING", "มีธุรกรรมรอตรวจหลายรายการ ระบบจะตรวจจากเครือข่ายให้อัตโนมัติ")
     tx = get_transaction(db, agreement, tx_hash)
     if tx.status == "pending":
         db.commit()  # Keep the submitted hash even if the RPC request below fails.

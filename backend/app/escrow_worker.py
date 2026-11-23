@@ -31,7 +31,7 @@ def scan_agreement(db: Session, chain: EscrowChain, agreement: EscrowAgreement, 
         logs.sort(key=lambda log: (int(log["blockNumber"], 16), int(log["logIndex"], 16)))
         for tx_hash in dict.fromkeys(log["transactionHash"].lower() for log in logs):
             tx = get_transaction(db, agreement, tx_hash)
-            reconcile(db, chain, agreement, tx, finalized)
+            reconcile(db, chain, agreement, tx, finalized, scanning=True)
             if tx.status == "pending":
                 return  # Retry this range if the receipt is temporarily unavailable.
         if (end == finalized_number and agreement.status == "prepared"

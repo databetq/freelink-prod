@@ -22,17 +22,18 @@ from app import auth
 from app.admin_accounts import provision_admin
 from app.config import get_settings
 from app.db import get_db
-from app.escrow_chain import FUNDED, REFUNDED, RELEASED, EscrowChain, hex_hash
+from app.escrow_chain import FUNDED, REFUNDED, RELEASED, SUBMITTED, EscrowChain, hex_hash
 from app.escrow_worker import sync_once
 from app.main import app
 from app.marketplace import platform_today
+from app.project_state import apply_escrow_event
 from app.models import (
     AdminCredential, AdminUserStatusEvent, EscrowAgreement, EscrowTransaction, Job, LoginSession, Profile, Project,
-    SupportProjectAccess, User, UserCredential, WalletChallenge, WalletLink,
+    SupportProjectAccess, User, UserCredential, WalletChallenge, WalletLink, WorkSubmission,
 )
 
 
-class MarketplaceTest(IsolatedAsyncioTestCase):
+class DatabaseTest(IsolatedAsyncioTestCase):
     def setUp(self):
         self.database = "freelink_test_" + uuid4().hex[:12]
         base = make_url(get_settings().database_url)
@@ -57,6 +58,16 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
     def database_session(self):
         with Session(self.engine) as db:
             yield db
+
+    def session_headers(self, token, **extra):
+        return {"Origin": get_settings().frontend_origin, "Cookie": f"{auth.COOKIE_NAME}={token}", **extra}
+
+
+class MarketplaceTest(DatabaseTest):
+    def confirm_submission_fixture(self, submission_id: str) -> None:
+        with Session(self.engine) as db:
+            db.get(WorkSubmission, UUID(submission_id)).chain_submitted_at = datetime.now(timezone.utc)
+            db.commit()
 
     async def test_wallet_link_requires_ownership_and_single_use_challenge(self):
         owner_wallet = Account.create()
@@ -379,6 +390,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
             read = (await call("PATCH", f"/notifications/{notice['id']}/read", client, 200)).json()
             self.assertTrue(read["read"])
 
+            self.confirm_submission_fixture(first["id"])
             revision = (await call("POST", project_path + "/request-revision", client, 200, json={
                 "submissionId": first["id"], "feedback": "Please correct the last page.",
             })).json()
@@ -396,8 +408,10 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
             await call("POST", project_path + "/approve", client, 409, json={"submissionId": first["id"]})
             revision_path = project_path + "/request-revision"
             request_revision = {"submissionId": second["id"], "feedback": "Please complete the mobile design."}
+            self.confirm_submission_fixture(second["id"])
             await call("POST", revision_path, client, 200, json=request_revision)
             third = (await call("POST", submit_path, freelancer, 201, json=revised)).json()["submissions"][0]
+            self.confirm_submission_fixture(third["id"])
             blocked = await call("POST", revision_path, client, 409,
                                  json={**request_revision, "submissionId": third["id"]})
             self.assertEqual(blocked.json()["code"], "WORK_REVISION_LIMIT_REACHED")
@@ -405,7 +419,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
             self.assertEqual((still_pending["status"], still_pending["revisionsUsed"]), ("pending", 2))
             approved = (await call("POST", project_path + "/approve", client, 200, json={"submissionId": third["id"]})).json()
             self.assertEqual((approved["status"], approved["escrowStatus"], approved["submissions"][0]["status"]),
-                             ("completed", "funded", "approved"))
+                             ("active", "funded", "approved"))
 
             snapshot = await call("GET", summary_path, admin, 200)
             self.assertEqual(snapshot.headers["cache-control"], "private, no-store")
@@ -462,7 +476,9 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
             waiting_review = await call("POST", review_path, client, 409, json=review_payload)
             self.assertEqual(waiting_review.json()["code"], "REVIEW_NOT_ELIGIBLE")
             with Session(self.engine) as db:
-                db.get(EscrowAgreement, agreement_id).status = "released"
+                agreement = db.get(EscrowAgreement, agreement_id)
+                agreement.status = "released"
+                apply_escrow_event(db, agreement, RELEASED, set())
                 db.commit()
             with self.assertLogs("uvicorn.error", level="INFO") as logs:
                 created_review = await call("POST", review_path, client, 201, json=review_payload)
@@ -559,9 +575,6 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
                 ("suspended", "Policy violation"), ("active", "Cleared"),
             ])
             auth.create_login(db, subject, "freelancer@example.test", "Freelancer", "freelancer")
-
-    def session_headers(self, token, **extra):
-        return {"Origin": get_settings().frontend_origin, "Cookie": f"{auth.COOKIE_NAME}={token}", **extra}
 
     async def test_freelancer_profile_edit_and_directory(self):
         with Session(self.engine) as db:
@@ -925,7 +938,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
         client, freelancer, arbiter, contract = [f"0x{value:040x}" for value in range(1, 5)]
         settings = get_settings().model_copy(update={
             "escrow_contract_address": contract, "escrow_thb_per_eth": Decimal("1000000"),
-            "escrow_confirmations": None,
+            "escrow_confirmations": None, "escrow_min_deadline_minutes": 10080,
         })
         now = int(datetime.now(timezone.utc).timestamp())
         deadline = now + 8 * 86400
@@ -1019,7 +1032,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
                 self.assertEqual(escrow_view["agreements"], [one])
                 self.assertEqual(escrow_view["deliverables"], ["เว็บไซต์ทดสอบ"])
                 self.assertEqual(escrow_view["approvedAgreementIds"], [])
-                self.assertEqual((escrow_view["proposedDeliveryDays"], escrow_view["minDeadlineDays"]), (8, 7))
+                self.assertEqual((escrow_view["proposedDeliveryDays"], escrow_view["minDeadlineMinutes"]), (8, 10080))
                 terms = json.loads(one["termsJson"])
                 self.assertEqual((terms["amountWei"], terms["deadline"], terms["scope"]),
                                  ("250000000000000", deadline, "Café และงานระบบ"))
@@ -1067,6 +1080,9 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
                     "title": "Website draft", "description": "The website is ready to review.",
                 }))["submissions"][0]
                 self.assertEqual((submission["milestoneNumber"], submission["checklist"]), (1, milestones[0]["checklist"]))
+                work_tx = f"0x{40:064x}"
+                new_receipt(work_tx, SUBMITTED, [key, freelancer], [bytes.fromhex(submission["workHash"][2:]), now + 900])
+                await record(work_tx, 200)
                 await request("POST", base + "/approve", "client", 200, json={"submissionId": submission["id"]})
                 self.assertEqual((await request("GET", path, "client", 200))["approvedAgreementIds"], [one["id"]])
                 await request("POST", path + "/prepare", "client", 409, json={"milestoneNumber": 2})

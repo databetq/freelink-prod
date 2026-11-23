@@ -183,7 +183,7 @@ class Project(Base):
         CheckConstraint("client_id <> freelancer_id", name="ck_projects_distinct_parties"),
         CheckConstraint("budget > 0", name="ck_projects_budget"),
         CheckConstraint(
-            "status IN ('active', 'in_review', 'revision', 'completed', 'disputed', 'cancelled')",
+            "status IN ('active', 'in_review', 'revision', 'completed', 'disputed', 'cancelled', 'resolved')",
             name="ck_projects_status",
         ),
     )
@@ -274,6 +274,9 @@ class WorkSubmission(Base):
     links: Mapped[list[dict[str, str]]] = mapped_column(JSON, server_default="[]")
     status: Mapped[str] = mapped_column(String(16), server_default="pending")
     feedback: Mapped[str | None] = mapped_column(Text)
+    work_hash: Mapped[str | None] = mapped_column(String(66))
+    chain_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    chain_review_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

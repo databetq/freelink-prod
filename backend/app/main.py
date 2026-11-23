@@ -18,6 +18,7 @@ from app.admin_auth import router as admin_auth_router
 from app.auth import router as auth_router
 from app.config import get_settings
 from app.db import get_engine
+from app.disputes import router as disputes_router
 from app.escrow import router as escrow_router
 from app.marketplace import router as marketplace_router
 from app.messages import router as messages_router
@@ -58,6 +59,7 @@ app.include_router(password_auth_router)
 app.include_router(wallet_router)
 app.include_router(admin_auth_router)
 app.include_router(admin_router)
+app.include_router(disputes_router)
 app.include_router(marketplace_router)
 app.include_router(escrow_router)
 app.include_router(profiles_router)

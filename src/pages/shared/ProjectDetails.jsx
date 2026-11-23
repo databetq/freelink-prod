@@ -434,7 +434,7 @@ export default function ProjectDetails() {
               </Button>
             )}
             {isClient && awaitingPayout && (
-              <div className="mt-2"><ReviewPaymentStatus projectId={project.id} milestoneNumber={fundedMilestone?.id} /></div>
+              <div className="mt-2"><ReviewPaymentStatus projectId={project.id} milestoneNumber={fundedMilestone?.id} role={role} /></div>
             )}
             {isClient && project.status === 'completed' && project.escrowStatus === 'released' && project.freelancerReviewed == null && (
               <p className="mt-2 text-xs text-ink-500">ยืนยันการจ่ายเงินแล้ว · API รีวิวไม่พร้อมใช้งาน</p>
@@ -537,7 +537,8 @@ export default function ProjectDetails() {
                     </Button>
                   )}
                   {project.status === 'in_review' && (
-                    <InfoBanner tone="info" title="ส่งงานแล้ว — รอลูกค้าตรวจรับ" />
+                    <InfoBanner tone="info" title={latestSubmission?.workHash && !latestSubmission.chainSubmittedAt
+                      ? 'รอยืนยันส่งงานบน Sepolia' : 'ส่งงานแล้ว — รอลูกค้าตรวจรับ'} />
                   )}
                   {project.status === 'completed' && (
                     <Button to="/freelancer/earnings" variant="brand" size="md" className="w-full" icon={Wallet}>

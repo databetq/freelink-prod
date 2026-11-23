@@ -144,6 +144,8 @@ export const projectStatus = {
   revision: { label: 'ขอแก้ไข', tone: 'rose' },
   completed: { label: 'เสร็จสิ้น', tone: 'emerald' },
   disputed: { label: 'มีข้อพิพาท', tone: 'rose' },
+  resolved: { label: 'ข้อพิพาทสิ้นสุดแล้ว', tone: 'slate' },
+  cancelled: { label: 'ยกเลิกแล้ว', tone: 'slate' },
 }
 
 export const escrowStatus = {

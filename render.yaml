@@ -43,5 +43,7 @@ services:
         value: "1000000"
       - key: ESCROW_CONFIRMATIONS
         value: "3"
+      - key: ESCROW_MIN_DEADLINE_MINUTES
+        value: "15"
       - key: ESCROW_RPC_URL
         sync: false

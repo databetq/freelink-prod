@@ -42,7 +42,14 @@ FUNDED = Event("EscrowFunded", ("bytes32", "bytes32", "address"),
 RELEASED = Event("PaymentReleased", ("bytes32", "address"), ("uint256", "uint256"))
 REFUNDED = Event("EscrowRefunded", ("bytes32", "address"), ("uint256",))
 RESOLVED = Event("DisputeResolved", ("bytes32",), ("uint16", "uint256", "uint256", "uint256", "bool"))
-EVENTS = {event.topic: event for event in (FUNDED, RELEASED, REFUNDED, RESOLVED)}
+ACCEPTED = Event("EscrowAccepted", ("bytes32", "address"), ())
+SUBMITTED = Event("WorkSubmitted", ("bytes32", "address"), ("bytes32", "uint64"))
+REVISION = Event("RevisionRequested", ("bytes32",), ("uint8", "string", "uint64"))
+DISPUTED = Event("DisputeOpened", ("bytes32", "address"), ("string", "address"))
+DEFERRED = Event("PayoutDeferred", ("address",), ("uint256",))
+# Progress events do not settle funds.
+LIFECYCLE = (ACCEPTED, SUBMITTED, REVISION, DISPUTED)
+EVENTS = {event.topic: event for event in (FUNDED, RELEASED, REFUNDED, RESOLVED, *LIFECYCLE)}
 
 
 class EscrowChain:

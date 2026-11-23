@@ -3,9 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { CheckCircle2, Send, ShieldCheck, UploadCloud } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { useWallet } from '@/contexts/WalletContext'
 import { useAsync } from '@/hooks/useAsync'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { projectService } from '@/services/api/projectService'
+import { escrowService } from '@/services/api/escrowService'
+import { hashTerms, readEscrow } from '@/services/blockchain/contractService'
+import { contractConfig } from '@/config/contractConfig'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/common/Button'
 import { Input, Textarea } from '@/components/common/FormField'
@@ -44,6 +48,7 @@ export default function SubmitWork() {
   const { projectId } = useParams()
   const { profileId } = useAuth()
   const toast = useToast()
+  const wallet = useWallet()
   const navigate = useNavigate()
 
   const { data: project, loading, error, refresh } = useAsync(
@@ -92,6 +97,24 @@ export default function SubmitWork() {
 
     setBusy(true)
     try {
+      const escrow = await escrowService.get(project.id)
+      const agreement = escrow.agreements.findLast((item) => item.status === 'funded')
+      if (!agreement) throw new Error('รอยืนยันเงินฝากของงวดนี้')
+      const terms = JSON.parse(agreement.termsJson)
+      if (wallet.chainId !== terms.chainId || contractConfig.chainId !== terms.chainId
+        || contractConfig.contractAddress?.toLowerCase() !== terms.contract
+        || wallet.address?.toLowerCase() !== terms.freelancer) {
+        throw new Error('เปิดหน้า Escrow และเชื่อม Wallet ฟรีแลนซ์ที่ระบุในข้อตกลง')
+      }
+      const onChain = await readEscrow({ escrowId: agreement.expectedEscrowId })
+      if (onChain?.statusName !== 'active' || onChain.termsHash !== hashTerms(agreement.termsJson)
+        || onChain.deadline < Date.now() / 1000) {
+        throw new Error('ตรวจสถานะการรับงาน กำหนดส่ง หรือคำขอแก้ไขในหน้า Escrow')
+      }
+      const previous = escrow.latestSubmissions?.[agreement.id]
+      if ((previous?.revisionsUsed ?? 0) !== onChain.revisionCount) {
+        throw new Error('จำนวนรอบแก้ไขยังไม่ตรงกับ Sepolia กรุณาตรวจสอบในหน้า Escrow')
+      }
       await projectService.submitWork(project.id, {
         title: values.title.trim(),
         description: values.description.trim(),
@@ -99,10 +122,10 @@ export default function SubmitWork() {
         files: await Promise.all(files.map(encodeAttachment)),
       })
       toast.success(
-        'ส่งงานแล้ว',
-        'ระบบบันทึกรายละเอียดการส่งงานแล้ว',
+        'บันทึกรายละเอียดงานแล้ว',
+        'กดยืนยันส่งงานบน Sepolia ในหน้า Escrow เพื่อเริ่มช่วงตรวจรับ',
       )
-      navigate(`/freelancer/projects/${project.id}`)
+      navigate(`/freelancer/projects/${project.id}/escrow`)
     } catch (err) {
       toast.error('ส่งงานไม่สำเร็จ', err.message)
     } finally {
@@ -155,6 +178,9 @@ export default function SubmitWork() {
             : 'ตรวจสถานะงานและงวดถัดไปในรายละเอียดโครงการ'}
         </InfoBanner>
       )}
+      <div className="mb-5">
+        <Button to={`/freelancer/projects/${project.id}/escrow`} variant="secondary" size="sm">เปิดหน้า Escrow</Button>
+      </div>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         <form onSubmit={submit} noValidate className="space-y-4">
@@ -244,7 +270,7 @@ export default function SubmitWork() {
               ยกเลิก
             </Button>
             <Button type="submit" variant="brand" size="md" icon={Send} loading={busy} disabled={!canSubmit || fileLimitExceeded}>
-              ส่งงานให้ลูกค้า
+              บันทึกงานและไปยืนยัน
             </Button>
           </div>
         </form>
@@ -288,7 +314,7 @@ export default function SubmitWork() {
               หลังส่งงาน
             </div>
             <ol className="mt-2.5 space-y-2 text-[11px] leading-relaxed text-ink-500">
-              <li>1. ลูกค้าได้รับแจ้งเตือนและตรวจงาน</li>
+              <li>1. ยืนยันส่งงานบน Sepolia ในหน้า Escrow เพื่อเริ่มช่วงตรวจรับ</li>
               <li>2. ลูกค้าอนุมัติงานและยืนยันการจ่ายเงินแยกในหน้า Escrow</li>
               <li>3. หากต้องแก้ไข คุณจะเห็น feedback และส่งใหม่ได้</li>
             </ol>

@@ -3,11 +3,12 @@ from binascii import Error as Base64Error
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from json import loads
+from hashlib import sha256
+from json import dumps, loads
 import logging
 from typing import Annotated, Literal
 from urllib.parse import quote
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BeforeValidator, Field
@@ -15,6 +16,7 @@ from sqlalchemy import String, cast, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentIdentity, Db, Identity, OptionalIdentity, trusted_origin
+from app.escrow_chain import hex_hash
 from app.errors import api_error
 from app.messages import open_project_thread
 from app.models import EscrowAgreement, EscrowTransaction, FreelancerReview, Job, Profile, Project, Proposal, User, WorkAttachment, WorkSubmission
@@ -149,7 +151,7 @@ def list_jobs(
 ):
     if featured:
         return []
-    stmt = job_query.where(Job.status == status)
+    stmt = job_query.where(Job.status == status, User.status == "active")
     if q.strip():
         term = q.strip()
         stmt = stmt.where(or_(
@@ -202,8 +204,8 @@ def create_job(payload: JobCreate, db: Db, identity: CurrentIdentity):
     return job_details(db, job_id)
 
 
-def ensure_editable(job: Job) -> None:
-    if job.status == "in_progress":
+def ensure_editable(db: Session, job: Job) -> None:
+    if job.status == "in_progress" or db.scalar(select(Project.id).where(Project.job_id == job.id)):
         raise api_error(409, "JOB_ALREADY_HIRED", "งานนี้จ้าง freelancer แล้ว")
 
 
@@ -211,7 +213,7 @@ def ensure_editable(job: Job) -> None:
 def edit_job(job_id: UUID, payload: JobPatch, db: Db, identity: CurrentIdentity):
     job = get_job(db, job_id, lock=True)
     require_owner(identity, job.client_id)
-    ensure_editable(job)
+    ensure_editable(db, job)
     changes = payload.model_dump(exclude_unset=True)
     # Only a new date is checked, so an overdue posting can still have its other fields edited.
     if "deadline" in changes and changes["deadline"] != job.deadline:
@@ -228,7 +230,7 @@ def edit_job(job_id: UUID, payload: JobPatch, db: Db, identity: CurrentIdentity)
 def delete_job(job_id: UUID, db: Db, identity: CurrentIdentity):
     job = get_job(db, job_id, lock=True)
     require_owner(identity, job.client_id)
-    ensure_editable(job)
+    ensure_editable(db, job)
     db.delete(job)
     db.commit()
     return Response(status_code=204)
@@ -266,6 +268,8 @@ def create_proposal(job_id: UUID, payload: ProposalWrite, db: Db, identity: Curr
     job = get_job(db, job_id, lock=True)
     if job.status != "open":
         raise api_error(409, "JOB_NOT_OPEN", "งานนี้ปิดรับข้อเสนอแล้ว")
+    if payload.bid_amount > job.budget_max:
+        raise api_error(422, "BID_OVER_BUDGET", "ราคาเสนอต้องไม่เกินงบสูงสุดของงาน")
     existing = db.scalar(select(Proposal.id).where(
         Proposal.job_id == job_id, Proposal.freelancer_id == identity.profile.id,
     ))
@@ -346,6 +350,8 @@ def hire_proposal(proposal_id: UUID, db: Db, identity: CurrentIdentity):
             raise api_error(409, "JOB_ALREADY_HIRED", "งานนี้จ้างจากข้อเสนออื่นแล้ว")
     else:
         ensure_pending_proposal(proposal, job)
+        if db.get(User, profile_user_id(db, proposal.freelancer_id)).status != "active":
+            raise api_error(409, "FREELANCER_UNAVAILABLE", "บัญชีฟรีแลนซ์นี้ยังรับงานไม่ได้")
         project = Project(
             job_id=job.id, proposal_id=proposal.id, client_id=job.client_id,
             freelancer_id=proposal.freelancer_id, title=job.title, budget=proposal.bid_amount,
@@ -474,15 +480,6 @@ def plan_released(latest: dict[int, EscrowAgreement]) -> bool:
     return 1 in latest and milestones_released(latest, len(loads(latest[1].terms_json)["milestones"]))
 
 
-def close_paid_job(db: Session, project_id: UUID) -> None:
-    # Serialize with approval so either order of approval and finalized payment closes the job.
-    project = db.get(Project, project_id, with_for_update=True, populate_existing=True)
-    if project is None or project.status != "completed":
-        return
-    if plan_released(latest_agreements(db, [project_id]).get(project_id, {})):
-        db.execute(update(Job).where(Job.id == project.job_id, Job.status == "in_progress").values(status="closed"))
-
-
 @router.get("/projects", response_model=list[ProjectResponse])
 def list_projects(db: Db, identity: CurrentIdentity):
     profile_id = identity.profile.id
@@ -533,13 +530,15 @@ def get_project(db: Session, project_id: UUID, identity: Identity, *, lock: bool
 
 @router.post("/projects/{project_id}/submissions", response_model=ProjectResponse, status_code=201, dependencies=write)
 def submit_work(project_id: UUID, payload: WorkSubmissionCreate, db: Db, identity: CurrentIdentity):
-    project = get_project(db, project_id, identity, lock=True)
-    require_owner(identity, project.freelancer_id)
-    if project.status not in ("active", "revision"):
-        raise api_error(409, "PROJECT_NOT_READY_FOR_SUBMISSION", "โครงการยังไม่พร้อมรับงานส่งมอบ")
+    require_owner(identity, get_project(db, project_id, identity).freelancer_id)
+    # The escrow sync locks the agreement before the project, so this takes the same order.
     agreement = db.scalar(select(EscrowAgreement).where(EscrowAgreement.project_id == project_id)
                           .order_by(EscrowAgreement.milestone_number.desc(), EscrowAgreement.attempt_number.desc())
                           .limit(1).with_for_update())
+    project = get_project(db, project_id, identity, lock=True)
+    db.refresh(project)
+    if project.status not in ("active", "revision"):
+        raise api_error(409, "PROJECT_NOT_READY_FOR_SUBMISSION", "โครงการยังไม่พร้อมรับงานส่งมอบ")
     if agreement is None or agreement.status != "funded":
         raise api_error(409, "ESCROW_NOT_FUNDED", "รอให้ระบบยืนยันการฝากเงินเข้า Escrow ของงวดนี้ก่อนส่งงาน")
     if db.scalar(select(WorkSubmission.id).where(
@@ -563,13 +562,24 @@ def submit_work(project_id: UUID, payload: WorkSubmissionCreate, db: Db, identit
 
     links = [link.model_dump(mode="json") for link in payload.links]
     first_link = links[0]["url"] if links else str(payload.link) if payload.link else None
-    submission = WorkSubmission(project_id=project_id, agreement_id=agreement.id, title=payload.title,
-                                description=payload.description, link=first_link, links=links)
+    submission_id = uuid4()
+    commitment = dumps({
+        "submissionId": str(submission_id),
+        "agreementId": str(agreement.id),
+        "title": payload.title,
+        "description": payload.description,
+        "link": first_link,
+        "links": links,
+        "files": [{"name": name, "sha256": sha256(content).hexdigest()} for name, content in attachments],
+    }, sort_keys=True, separators=(",", ":"))
+    submission = WorkSubmission(id=submission_id, project_id=project_id, agreement_id=agreement.id,
+                                title=payload.title, description=payload.description, link=first_link, links=links,
+                                work_hash=hex_hash(commitment.encode("utf-8")))
     db.add(submission)
     db.flush()
     db.add_all(WorkAttachment(submission_id=submission.id, name=name, content=content) for name, content in attachments)
     project.status = "in_review"
-    notify(db, profile_user_id(db, project.client_id), "submission", "มีงานส่งตรวจรับ", project.title,
+    notify(db, profile_user_id(db, project.client_id), "submission", "มีงานรอยืนยันการส่งบน Sepolia", project.title,
            f"/client/projects/{project_id}/review")
     db.commit()
     return project_views(db, [project])[0]
@@ -594,7 +604,16 @@ def review_submission(db: Session, project: Project, submission_id: UUID) -> Wor
     if (project.status != "in_review" or submission is None or submission.project_id != project.id
             or submission.status != "pending"):
         raise api_error(409, "WORK_NOT_PENDING", "งานส่งมอบนี้ไม่ได้อยู่ระหว่างการตรวจรับแล้ว")
+    if submission.work_hash and submission.chain_submitted_at is None:
+        raise api_error(409, "WORK_NOT_ON_CHAIN", "รอให้ระบบยืนยันการส่งงานบน Sepolia ก่อนตรวจรับ")
     return submission
+
+
+def funded_agreement(db: Session, submission: WorkSubmission) -> EscrowAgreement:
+    agreement = db.get(EscrowAgreement, submission.agreement_id)
+    if agreement.status != "funded":
+        raise api_error(409, "ESCROW_NOT_FUNDED", "เงินของงวดนี้ไม่ได้อยู่ใน Escrow แล้ว")
+    return agreement
 
 
 @router.post("/projects/{project_id}/approve", response_model=ProjectResponse, dependencies=write)
@@ -602,13 +621,9 @@ def approve_work(project_id: UUID, payload: WorkReviewRequest, db: Db, identity:
     project = get_project(db, project_id, identity, lock=True)
     require_owner(identity, project.client_id)
     submission = review_submission(db, project, payload.submission_id)
-    agreement = db.get(EscrowAgreement, submission.agreement_id)
-    final_milestone = agreement.milestone_number == len(loads(agreement.terms_json)["milestones"])
+    funded_agreement(db, submission)
     submission.status = "approved"
-    project.status = "completed" if final_milestone else "active"
-    if final_milestone:
-        db.flush()
-        close_paid_job(db, project_id)
+    project.status = "active"
     notify(db, profile_user_id(db, project.freelancer_id), "submission", "ลูกค้าอนุมัติงานแล้ว", project.title,
            f"/freelancer/projects/{project_id}")
     db.commit()
@@ -620,7 +635,9 @@ def request_work_revision(project_id: UUID, payload: WorkRevisionRequest, db: Db
     project = get_project(db, project_id, identity, lock=True)
     require_owner(identity, project.client_id)
     submission = review_submission(db, project, payload.submission_id)
-    agreement = db.get(EscrowAgreement, submission.agreement_id)
+    agreement = funded_agreement(db, submission)
+    if submission.chain_review_ends_at is not None and datetime.now(timezone.utc) > submission.chain_review_ends_at:
+        raise api_error(409, "WORK_REVIEW_EXPIRED", "พ้นช่วงตรวจรับบน Sepolia แล้ว จึงขอแก้ไขไม่ได้")
     used = db.scalar(select(func.count()).select_from(WorkSubmission).where(
         WorkSubmission.agreement_id == agreement.id, WorkSubmission.status == "revision",
     ))

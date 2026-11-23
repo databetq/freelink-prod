@@ -170,8 +170,8 @@ Path alias `@` ชี้ไปที่ `src` (ตั้งค่าใน `vite
 
 Frontend ใช้ REST API ผ่าน Axios และส่ง session cookie กับคำขอ
 
-- `src/services/api/apiClient.js` — Axios instance, แนบ Bearer token, normalize error
-- `src/services/api/endpoints.js` — **DRAFT** endpoint map (ยังไม่ยืนยันกับทีม Backend)
+- `src/services/api/apiClient.js` — Axios instance ที่ส่ง session cookie และแปลง API errors
+- `src/services/api/endpoints.js` — เส้นทาง REST API ที่ frontend เรียกใช้
 - `src/services/api/jobService.js`, `proposalService.js`, `projectService.js`, `profileService.js`, `notificationService.js`, `transactionService.js`, `authService.js`
 - `src/services/auth/authService.js` — Google Login และคืน session จาก API
 - `tests/fixtures/` — ข้อมูลและ services จำลองที่ใช้สำหรับทดสอบ
@@ -182,13 +182,13 @@ Frontend ใช้ REST API ผ่าน Axios และส่ง session cookie
 
 ## 9. การเชื่อมต่อ Solidity / Wallet
 
-- `src/config/contractConfig.js` — placeholder ทั้งหมด (chain id, address, ABI, method names, currency)
+- `src/config/contractConfig.js` — ABI ของ FreelinkEscrow V2 และเครือข่ายกับที่อยู่สัญญาจาก environment
 - `src/services/blockchain/walletService.js` — connect/disconnect, chain id, balance, network switch, wallet events
-- `src/services/blockchain/contractService.js` — read/write functions ที่ **throw `ContractNotConfiguredError`** จนกว่าจะได้ ABI/address/chain id
+- `src/services/blockchain/contractService.js` — อ่านสถานะสัญญาและส่งธุรกรรมที่เซ็นผ่าน MetaMask
 - `src/services/blockchain/transactionService.js` — ติดตาม pending / confirmed / failed จาก provider จริง
-- UI Escrow และ Wallet แสดงสถานะ “ยังไม่พร้อม” อย่างตรงไปตรงมา
+- หน้า Escrow รองรับการฝาก รับงาน ส่งงาน ขอแก้ ปล่อยเงิน เบิกหลังช่วงตรวจ คืนเงิน และข้อพิพาท ส่วนการถอนยอดค้างอยู่ในหน้า Wallet
 
-การเชื่อม Wallet ทำได้จริงผ่าน MetaMask/EIP-1193 แต่ **การฝาก/ปล่อยเงินจะยังไม่ทำงาน** จนกว่าทีม Contract จะส่งข้อมูลครบ
+วิธีเดโมด้วยแยก Wallet ผู้จ้าง ฟรีแลนซ์ และผู้ตัดสินอยู่ใน [คู่มือ Backend](./backend/README.md)
 
 ---
 
@@ -213,9 +213,8 @@ Frontend ใช้ REST API ผ่าน Axios และส่ง session cookie
 
 ## 11. ข้อจำกัดที่ทราบ
 
-- FastAPI มี API สำหรับ Auth, Jobs, Proposals และ Projects ส่วนโปรไฟล์ แชต แจ้งเตือน และประวัติธุรกรรมยังรอ endpoint
-- ธุรกรรม Escrow ใช้ wallet กับ contract บน Sepolia การซิงก์สถานะเข้าฐานข้อมูลเป็นงานแยก
-- หน้า Admin ต้องใช้บัญชีบทบาท admin และยังรอ REST endpoint
+- การซิงก์ธุรกรรม Sepolia เข้าฐานข้อมูลต้องมี escrow worker ทำงาน
+- หน้า Admin ใช้บัญชีบทบาท admin และการตัดสินข้อพิพาทต้องใช้ Wallet ผู้ตัดสินของรายการนั้น
 - Google Fonts ต้องใช้อินเทอร์เน็ต (มี fallback เป็น system font)
 - ชุดทดสอบ backend อยู่ที่ `backend/tests/`
 

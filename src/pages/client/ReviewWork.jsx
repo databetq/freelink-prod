@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -36,7 +36,7 @@ export default function ReviewWork() {
   const { profileId } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
-  const { data: project, loading, error, refresh } = useAsync(
+  const { data: project, loading, error, refresh, setData } = useAsync(
     () => projectService.getProject(projectId),
     [projectId],
   )
@@ -48,6 +48,22 @@ export default function ReviewWork() {
   const [feedbackError, setFeedbackError] = useState('')
   const [revisionItems, setRevisionItems] = useState([])
   const [busy, setBusy] = useState(false)
+  const latestSubmission = project?.submissions?.[0]
+  const waitingForChain = Boolean(latestSubmission?.workHash && !latestSubmission.chainSubmittedAt)
+
+  useEffect(() => {
+    if (!waitingForChain || project?.status !== 'in_review') return undefined
+    let current = true
+    const interval = setInterval(async () => {
+      try {
+        const updated = await projectService.getProject(projectId)
+        if (current) setData(updated)
+      } catch {
+        // Keep the submission visible during a temporary API outage.
+      }
+    }, 12000)
+    return () => { current = false; clearInterval(interval) }
+  }, [waitingForChain, project?.status, projectId, setData])
 
   if (loading) return <PageLoader />
   if (error || !project) return <ErrorState error={error} onRetry={refresh} />
@@ -66,12 +82,13 @@ export default function ReviewWork() {
     )
   }
 
-  const submission = project.submissions?.[0]
+  const submission = latestSubmission
   const checklist = submission?.checklist ?? []
   const milestone = project.milestones?.find((item) => item.id === submission?.milestoneNumber)
-  const canReview = project.status === 'in_review' && submission?.status === 'pending'
+  const canReview = project.status === 'in_review' && submission?.status === 'pending' && !waitingForChain
   const hasRevisionLimit = Number.isInteger(submission?.revisionLimit) && Number.isInteger(submission?.revisionsUsed)
-  const canRequestRevision = canReview && hasRevisionLimit && submission.revisionsUsed < submission.revisionLimit
+  const reviewExpired = submission?.chainReviewEndsAt && Date.now() > Date.parse(submission.chainReviewEndsAt)
+  const canRequestRevision = canReview && hasRevisionLimit && submission.revisionsUsed < submission.revisionLimit && !reviewExpired
   const status = projectStatus[project.status]
   const escrow = escrowStatus[project.escrowStatus]
 
@@ -130,14 +147,14 @@ export default function ReviewWork() {
     setBusy(true)
     try {
       await projectService.requestRevision(project.id, submission.id, message)
-      toast.success('ส่งคำขอแก้ไขแล้ว', 'ฟรีแลนซ์จะเห็นข้อเสนอแนะในหน้าโครงการ')
+      toast.success('บันทึกคำขอแก้ไขแล้ว', 'ไปที่ Escrow เพื่อยืนยันคำขอบน Sepolia')
       setRevisionOpen(false)
       setFeedback('')
       setRevisionItems([])
-      navigate(`/client/projects/${project.id}`)
+      navigate(`/client/projects/${project.id}/escrow`)
     } catch (err) {
       toast.error('ส่งคำขอแก้ไขไม่สำเร็จ', err.message)
-      if (err.code === 'WORK_REVISION_LIMIT_REACHED') {
+      if (['WORK_REVISION_LIMIT_REACHED', 'WORK_REVIEW_EXPIRED'].includes(err.code)) {
         setRevisionOpen(false)
         refresh()
       }
@@ -214,6 +231,9 @@ export default function ReviewWork() {
             ) : <p className="mt-2 text-xs text-ink-600">ตรวจงานจากขอบเขตที่ตกลงกันและไฟล์หรือลิงก์ของงานที่ส่ง</p>}
           </section>
 
+          {waitingForChain && project.status === 'in_review' && (
+            <InfoBanner>รอฟรีแลนซ์ยืนยันการส่งงานบน Sepolia และรอระบบตรวจธุรกรรมก่อนเริ่มตรวจรับ</InfoBanner>
+          )}
           {canReview && <section className="card p-5">
             <h2 className="text-sm font-bold">การตัดสินใจ</h2>
             {hasRevisionLimit && (
@@ -242,7 +262,9 @@ export default function ReviewWork() {
                 ขอแก้ไขงาน
               </Button>
             </div>
-            {!canRequestRevision && hasRevisionLimit && (
+            {reviewExpired ? (
+              <InfoBanner className="mt-3">พ้นช่วงตรวจรับบน Sepolia แล้ว ฟรีแลนซ์สามารถเบิกเงินได้จากหน้า Escrow</InfoBanner>
+            ) : !canRequestRevision && hasRevisionLimit && (
               <div className="mt-3">
                 <InfoBanner tone="warning">หากงานยังไม่ผ่านรายการตรวจรับ คุณสามารถแจ้งทีมให้ตรวจหลักฐานได้</InfoBanner>
                 <Button to={`/help?projectId=${project.id}#contact`} variant="ghost" size="sm" className="mt-2">

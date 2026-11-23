@@ -1,6 +1,11 @@
 import { apiClient, assertApiConfigured } from './apiClient'
 
 export const adminService = {
+  getDisputes() {
+    assertApiConfigured()
+    return apiClient.get('/admin/disputes').then((response) => response.data)
+  },
+
   getOverview() {
     assertApiConfigured()
     return apiClient.get('/admin/overview').then((r) => r.data)

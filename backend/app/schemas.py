@@ -201,6 +201,9 @@ class WorkFileResponse(ApiModel):
 
 
 class WorkSubmissionResponse(ApiModel):
+    work_hash: str | None = None
+    chain_submitted_at: datetime | None = None
+    chain_review_ends_at: datetime | None = None
     id: UUID
     agreement_id: UUID
     milestone_number: int = 1

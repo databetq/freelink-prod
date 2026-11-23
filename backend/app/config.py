@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     escrow_rpc_url: SecretStr = SecretStr("")
     # Unset waits for finalized blocks. A testnet demo can count a few confirmations instead.
     escrow_confirmations: NonNegativeInt | None = None
+    escrow_min_deadline_minutes: PositiveInt = 7 * 24 * 60
 
 
 @lru_cache

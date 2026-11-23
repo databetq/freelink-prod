@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { formatEther } from 'ethers'
 import { Button } from '@/components/common/Button'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { ErrorState } from '@/components/common/ErrorState'
 import { InfoBanner } from '@/components/common/InfoBanner'
 import { PageLoader } from '@/components/common/LoadingSkeleton'
@@ -33,6 +34,10 @@ const txErrors = {
 }
 const txMessages = {
   EscrowFunded: 'ยืนยันการฝากเงินแล้ว',
+  EscrowAccepted: 'ยืนยันการรับงานแล้ว',
+  WorkSubmitted: 'ยืนยันการส่งงานแล้ว',
+  RevisionRequested: 'ยืนยันการขอแก้ไขแล้ว',
+  DisputeOpened: 'ยืนยันการเปิดข้อพิพาทแล้ว',
   PaymentReleased: 'ยืนยันการจ่ายเงินแล้ว',
   EscrowRefunded: 'ยืนยันการคืนเงินแล้ว',
   DisputeResolved: 'ยืนยันผลข้อพิพาทแล้ว',
@@ -75,14 +80,16 @@ function EscrowWorkspace({ project, isClient }) {
 
   if (loading) return <PageLoader />
   if (error || !data) return <ErrorState error={error} onRetry={refresh} />
-  const { agreements, tosText, proposedDeliveryDays, minDeadlineDays, approvedAgreementIds = [], deliverables } = data
+  const { agreements, tosText, proposedDeliveryDays, minDeadlineMinutes,
+    approvedAgreementIds = [], latestSubmissions, deliverables } = data
+  const projectStatus = data.projectStatus ?? project.status
   const currentByNumber = new Map(agreements.map((item) => [item.milestoneNumber, item]))
   const activeNumber = [...currentByNumber.values()].filter((item) => item.status === 'released').length + 1
   const active = currentByNumber.get(activeNumber)
   const agreement = agreements.find((item) => item.id === selection) || active || agreements.at(-1)
   const plan = agreements.length ? JSON.parse(agreements[0].termsJson).milestones : null
   const totalMilestones = plan?.length ?? 1
-  const needsPreparation = !['cancelled', 'completed'].includes(project.status) && activeNumber <= totalMilestones
+  const needsPreparation = !['cancelled', 'completed', 'disputed', 'resolved'].includes(projectStatus) && activeNumber <= totalMilestones
     && (!active || ['refunded', 'expired'].includes(active.status))
   const nextReady = needsPreparation && activeNumber > 1 && !active
 
@@ -110,7 +117,7 @@ function EscrowWorkspace({ project, isClient }) {
         {isClient && nextReady && <InfoBanner title={`พร้อมเตรียมงวด ${activeNumber}`}>
           ยืนยันการจ่ายเงินงวด {activeNumber - 1} แล้ว คุณเตรียมข้อตกลงงวดนี้ได้ทันที
         </InfoBanner>}
-        {isClient && active?.status === 'funded' && activeNumber < totalMilestones && (
+        {isClient && projectStatus !== 'disputed' && active?.status === 'funded' && activeNumber < totalMilestones && (
           <InfoBanner title={`งวด ${activeNumber + 1} รอการยืนยันการจ่ายงวด ${activeNumber}`}>
             ปุ่มสร้างและดูข้อตกลงจะขึ้นอัตโนมัติเมื่อระบบยืนยันการจ่ายงวดก่อน วันส่งตามแผนคือวันครบกำหนดส่งงาน คุณเตรียมงวดถัดไปได้ทันทีที่ปุ่มขึ้น
           </InfoBanner>
@@ -124,7 +131,7 @@ function EscrowWorkspace({ project, isClient }) {
         {isClient && needsPreparation && (
           <EscrowPrepareForm key={`${activeNumber}:${active?.id}`} project={project} agreement={active}
             milestoneNumber={activeNumber} hasPlan={agreements.length > 0} busy={busy} onPrepare={prepare}
-            proposedDeliveryDays={proposedDeliveryDays} minDeadlineDays={minDeadlineDays} deliverables={deliverables}
+            proposedDeliveryDays={proposedDeliveryDays} minDeadlineMinutes={minDeadlineMinutes} deliverables={deliverables}
             plannedDeadline={!active ? plan?.[activeNumber - 1]?.deadline : undefined} />
         )}
         {agreements.length > 1 && (
@@ -137,13 +144,14 @@ function EscrowWorkspace({ project, isClient }) {
           </label>
         )}
         {agreement && <AgreementPayment key={agreement.id} agreement={agreement} projectId={project.id}
+          submission={latestSubmissions?.[agreement.id]} projectStatus={projectStatus}
           isClient={isClient} isActive={agreement.id === active?.id} workApproved={approvedAgreementIds.includes(agreement.id)} tosText={tosText} reload={reload} />}
       </div>
     </div>
   )
 }
 
-function AgreementPayment({ agreement, projectId, isClient, isActive, workApproved, tosText, reload }) {
+function AgreementPayment({ agreement, projectId, submission, projectStatus, isClient, isActive, workApproved, tosText, reload }) {
   const wallet = useWallet()
   const terms = JSON.parse(agreement.termsJson)
   const termsHash = contract.hashTerms(agreement.termsJson)
@@ -156,9 +164,9 @@ function AgreementPayment({ agreement, projectId, isClient, isActive, workApprov
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [hash, setHash] = useState('')
-  const [broadcastHash, setBroadcastHash] = useState(null)
   const [checkedResult, setCheckedResult] = useState(null)
-  const [acceptTx, setAcceptTx] = useState(null)
+  const [walletTx, setWalletTx] = useState(null)
+  const [confirmation, setConfirmation] = useState(null)
   const { data: chain, loading: chainLoading, error: chainError, refresh: refreshChain } = useAsync(async () => {
     if (!chainReady) return null
     const [onChain, quote] = await Promise.all([
@@ -169,24 +177,48 @@ function AgreementPayment({ agreement, projectId, isClient, isActive, workApprov
   }, [chainReady, wallet.address, agreement.id, agreement.status])
   const pending = agreement.transactions.filter((tx) => tx.status === 'pending')
   const checkedTransaction = agreement.transactions.find((tx) => tx.txHash === checkedResult?.txHash) || checkedResult
-  const waitingForOwnTransaction = broadcastHash && !agreement.transactions.some((tx) => tx.txHash === broadcastHash && tx.status !== 'pending')
+  const waitingForOwnTransaction = walletTx?.status === TX_STATUS.PENDING
   const deposit = agreement.transactions.find((tx) => tx.event === 'EscrowFunded')
   const onChain = chainReady ? chain?.onChain : null
   const canDeposit = signerReady && agreement.status === 'prepared' && chain?.quote && !onChain && !waitingForOwnTransaction
     && terms.deadline > Date.now() / 1000
-  const canRelease = signerReady && agreement.status === 'funded' && ['active', 'submitted'].includes(onChain?.statusName)
+  const chainStatus = onChain?.statusName
   const chainTermsMatch = onChain && onChain.termsHash === termsHash && String(onChain.amount) === terms.amountWei
     && onChain.client.toLowerCase() === terms.client && onChain.freelancer.toLowerCase() === terms.freelancer
+  const address = isClient ? terms.client : terms.freelancer
+  const escrowId = agreement.expectedEscrowId
+  const signedAction = { escrowId, address }
+  const canAct = chainTermsMatch && agreement.status === 'funded' && isActive
+    && (isClient ? signerReady : freelancerSignerReady) && !busy && !chainError
+  const now = Date.now() / 1000
+  const openForReview = chainStatus === 'submitted' && now <= onChain.reviewEndsAt
+  const { data: disputePolicy } = useAsync(
+    () => chainReady && chainStatus === 'disputed' ? contract.readPolicy() : null,
+    [chainReady, chainStatus],
+  )
+  const disputeEndsAt = disputePolicy && onChain ? onChain.disputedAt + disputePolicy.arbiterTimeout : null
+  const canRelease = isClient && canAct && ['active', 'submitted'].includes(chainStatus)
+  const canSubmit = !isClient && canAct && chainStatus === 'active' && now <= onChain.deadline
+    && submission && ['pending', 'approved'].includes(submission.status) && submission.revisionsUsed === onChain.revisionCount
+  const canRevise = isClient && canAct && openForReview
+    && submission?.status === 'revision' && submission.revisionsUsed === onChain.revisionCount + 1
+  const canClaim = !isClient && canAct && chainStatus === 'submitted' && !openForReview
+  const canRefund = canAct && (isClient
+    ? chainStatus === 'funded' || (chainStatus === 'active' && onChain.revisionCount === 0 && now > onChain.deadline)
+    : ['funded', 'active', 'submitted', 'disputed'].includes(chainStatus))
+  const canDispute = canAct && (isClient
+    ? chainStatus === 'active' || openForReview
+    : chainStatus === 'active' && now <= onChain.deadline)
+  const canSettle = canAct && chainStatus === 'disputed' && disputeEndsAt && now > disputeEndsAt
   const awaitingAcceptance = agreement.status === 'funded' && onChain?.statusName === 'funded'
   const acceptanceDeadlinePassed = terms.deadline <= Date.now() / 1000
-  const canAccept = !isClient && freelancerSignerReady && awaitingAcceptance && chainTermsMatch
-    && onChain.deadline === terms.deadline && !acceptanceDeadlinePassed && !chainError && !chainLoading
-    && acceptTx?.status !== TX_STATUS.CONFIRMED
+  const canAccept = !isClient && canAct && awaitingAcceptance
+    && onChain.deadline === terms.deadline && !acceptanceDeadlinePassed
   useEffect(() => {
-    if (!isClient || !awaitingAcceptance || busy || chainLoading) return undefined
+    if (!chainReady || !['prepared', 'funded'].includes(agreement.status) || busy || chainLoading) return undefined
     const timer = setTimeout(refreshChain, 12000)
     return () => clearTimeout(timer)
-  }, [isClient, awaitingAcceptance, busy, chainLoading, refreshChain])
+  }, [chainReady, agreement.status, busy, chainLoading, refreshChain])
   const releaseAwaitingSync = agreement.status === 'funded' && chainTermsMatch && onChain.statusName === 'released'
   let statusLabel = labels[agreement.status]
   if (agreement.status === 'prepared') {
@@ -194,8 +226,7 @@ function AgreementPayment({ agreement, projectId, isClient, isActive, workApprov
     else if (pending.length > 0) statusLabel = 'กำลังตรวจธุรกรรมบนเครือข่าย'
   }
   if (releaseAwaitingSync) statusLabel = 'ปล่อยเงินแล้วบน Sepolia · รอยืนยันในระบบ'
-  const releasePending = releaseAwaitingSync || waitingForOwnTransaction || pending.some((tx) => tx.event === 'PaymentReleased')
-  const showReleaseProgress = isActive && agreement.status === 'funded' && (workApproved || releasePending || pending.length > 0)
+  const showReleaseProgress = isActive && agreement.status === 'funded' && (workApproved || releaseAwaitingSync)
 
   async function verify(txHash) {
     const result = await escrowService.recordTransaction(projectId, agreement.id, txHash)
@@ -220,49 +251,35 @@ function AgreementPayment({ agreement, projectId, isClient, isActive, workApprov
     }
   }
 
-  async function send(isDeposit) {
+  async function send(action) {
     setBusy(true)
     setMessage('')
     setCheckedResult(null)
     try {
-      if (isDeposit) {
-        await escrowService.consent(projectId, { agreementId: agreement.id, termsHash, tosVersion: terms.tosVersion, accepted })
+      const tx = await executeTransaction(action, { onStatus: setWalletTx })
+      if (tx.status === TX_STATUS.CONFIRMED) {
+        setHash(tx.hash)
+        const result = await verify(tx.hash)
+        if (result.status === 'rejected') setMessage(txErrors[result.error] || 'ตรวจสอบธุรกรรมไม่ผ่าน')
+        setHash('')
       }
-      const tx = isDeposit ? await contract.depositEscrow({
-        projectKey: terms.projectKey, clientAddress: terms.client, freelancerAddress: terms.freelancer,
-        deadline: terms.deadline, termsHash, amountWei: terms.amountWei, expectedTotal: chain.quote.total,
-      }) : await contract.releasePayment({ escrowId: agreement.escrowId, clientAddress: terms.client })
-      setBroadcastHash(tx.hash)
-      setHash(tx.hash)
-      const result = await verify(tx.hash)
-      if (result.status === 'rejected') setMessage(txErrors[result.error] || 'ตรวจสอบธุรกรรมไม่ผ่าน')
-      setHash('')
-      refreshChain()
     } catch (err) {
-      setMessage(err.isApiError ? err.message : normalizeWalletError(err).message)
-      refreshChain()
+      setMessage(err.message)
     } finally {
+      await refreshChain()
+      setConfirmation(null)
       setBusy(false)
     }
   }
 
-  async function acceptWork() {
-    if (!canAccept || busy) return
-    setBusy(true)
-    setMessage('')
-    setCheckedResult(null)
-    try {
-      await executeTransaction(() => contract.acceptEscrow({
-        escrowId: agreement.expectedEscrowId,
-        freelancerAddress: terms.freelancer,
-        termsHash,
-        expectedAmountWei: terms.amountWei,
-        expectedDeadline: terms.deadline,
-      }), { onStatus: setAcceptTx })
-      await refreshChain()
-    } finally {
-      setBusy(false)
-    }
+  function depositFunds() {
+    return send(async () => {
+      await escrowService.consent(projectId, { agreementId: agreement.id, termsHash, tosVersion: terms.tosVersion, accepted })
+      return contract.depositEscrow({
+        projectKey: terms.projectKey, clientAddress: terms.client, freelancerAddress: terms.freelancer,
+        deadline: terms.deadline, termsHash, amountWei: terms.amountWei, expectedTotal: chain.quote.total,
+      })
+    })
   }
 
   return (
@@ -296,7 +313,7 @@ function AgreementPayment({ agreement, projectId, isClient, isActive, workApprov
               <input className="mt-1" type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />
               <span>ฉันยืนยันข้อตกลงงวดนี้และยอมรับเงื่อนไขการใช้งานฉบับ {terms.tosVersion}<br />{tosText}</span>
             </label>
-            <Button variant="brand" loading={busy} disabled={!accepted} onClick={() => send(true)}>ฝากเงินผ่าน MetaMask</Button>
+            <Button variant="brand" loading={busy} disabled={!accepted || chainLoading || chainError} onClick={depositFunds}>ฝากเงินผ่าน MetaMask</Button>
           </div>
         )}
         {showReleaseProgress && (
@@ -304,21 +321,58 @@ function AgreementPayment({ agreement, projectId, isClient, isActive, workApprov
             <ReviewPaymentStatus projectId={projectId} milestoneNumber={agreement.milestoneNumber} showEscrowLink={false} />
           </InfoBanner>
         )}
-        {isClient && canRelease && chainTermsMatch && !waitingForOwnTransaction && <Button loading={busy} onClick={() => send(false)}>ปล่อยเงินงวดนี้</Button>}
+        {canRelease && <Button onClick={() => send(() => contract.releasePayment({ escrowId, clientAddress: terms.client }))}>ปล่อยเงินงวดนี้</Button>}
         {canAccept && (
           <div className="space-y-2">
             <p className="text-sm text-ink-600">ยืนยันรับข้อตกลงงวดนี้บน Sepolia เพื่อให้ผู้จ้างปล่อยเงินได้</p>
-            <Button variant="brand" loading={busy} onClick={acceptWork}>รับงานบน Sepolia</Button>
+            <Button variant="brand" onClick={() => send(() => contract.acceptEscrow({
+              escrowId, freelancerAddress: terms.freelancer, termsHash,
+              expectedAmountWei: terms.amountWei, expectedDeadline: terms.deadline,
+            }))}>รับงานบน Sepolia</Button>
           </div>
         )}
-        {!isClient && agreement.status === 'funded' && ['active', 'submitted'].includes(onChain?.statusName) && (
-          <InfoBanner>รับงานบน Sepolia แล้ว ผู้จ้างสามารถปล่อยเงินจากหน้าข้อตกลงได้</InfoBanner>
+        {chainTermsMatch && chainStatus === 'submitted' && (
+          <p className="text-sm">สิ้นสุดช่วงตรวจรับ {new Date(onChain.reviewEndsAt * 1000).toLocaleString('th-TH')}</p>
         )}
-        {acceptTx && <TransactionStatus {...acceptTx} />}
+        {chainTermsMatch && chainStatus === 'active' && (
+          <p className="text-sm">กำหนดส่งบน Sepolia {new Date(onChain.deadline * 1000).toLocaleString('th-TH')}</p>
+        )}
+        {chainTermsMatch && chainStatus === 'disputed' && <InfoBanner title="อยู่ระหว่างข้อพิพาท">
+          {disputeEndsAt ? `แบ่งเงินได้เมื่อพ้น ${new Date(disputeEndsAt * 1000).toLocaleString('th-TH')} หากผู้ตัดสินยังไม่ได้ตัดสิน` : 'รอผู้ตัดสินดำเนินการ'}
+        </InfoBanner>}
+        {chainTermsMatch && chainStatus === 'resolved' && (
+          <InfoBanner>ฟรีแลนซ์ได้รับ {onChain.payoutBps / 100}% ของค่าจ้าง ส่วนที่เหลือคืนผู้จ้าง</InfoBanner>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {canSubmit && <Button onClick={() => send(() => contract.submitWork({ ...signedAction, workHash: submission.workHash }))}>ยืนยันส่งงานบน Sepolia</Button>}
+          {!isClient && canAct && chainStatus === 'active' && now <= onChain.deadline
+            && ['active', 'revision'].includes(projectStatus) && !canSubmit
+            && (!submission || submission.status === 'revision' && submission.revisionsUsed === onChain.revisionCount) && (
+              <Button to={`/freelancer/projects/${projectId}/submit`} variant="secondary">ไปหน้าส่งงาน</Button>
+          )}
+          {canRevise && <Button onClick={() => send(() => contract.requestRevision({ ...signedAction, reason: 'Revision requested in Freelink' }))}>ยืนยันขอแก้บน Sepolia</Button>}
+          {canClaim && <Button onClick={() => send(() => contract.claimAfterReview(signedAction))}>รับเงินเมื่อพ้นช่วงตรวจ</Button>}
+          {canRefund && <Button variant="secondary" onClick={() => setConfirmation({
+            title: 'คืนเงินให้ผู้จ้าง?', description: 'ระบบจะคืนเงินฝากและค่าธรรมเนียมทั้งหมดให้ผู้จ้างสำหรับงวดนี้',
+            action: () => contract.refundClient(signedAction),
+          })}>คืนเงินให้ผู้จ้าง</Button>}
+          {canDispute && <Button variant="secondary" onClick={() => setConfirmation({
+            title: 'เปิดข้อพิพาท?', description: 'เงินงวดนี้จะถูกล็อกไว้ให้ผู้ตัดสินพิจารณา ส่งหลักฐานเพิ่มเติมได้ผ่านหน้าช่วยเหลือ',
+            action: () => contract.openDispute({ ...signedAction, reason: 'Dispute opened in Freelink' }),
+          })}>เปิดข้อพิพาท</Button>}
+          {canSettle && <Button variant="secondary" onClick={() => setConfirmation({
+            title: 'ยืนยันแบ่งค่าจ้างคนละครึ่ง?', description: 'ครบกำหนดรอผู้ตัดสินแล้ว สัญญาจะแบ่งค่าจ้างและปิดข้อพิพาท',
+            action: () => contract.settleExpiredDispute(signedAction),
+          })}>แบ่งเงินเมื่อพ้นกำหนดตัดสิน</Button>}
+        </div>
+        <ConfirmDialog open={Boolean(confirmation)} loading={busy} title={confirmation?.title}
+          description={confirmation?.description} onClose={() => { if (!busy) setConfirmation(null) }}
+          onConfirm={() => { if (confirmation && !busy) send(confirmation.action) }} />
+        {walletTx && <TransactionStatus {...walletTx} />}
         {!showReleaseProgress && (pending.length > 0 || releaseAwaitingSync) && (
           <InfoBanner>{releaseAwaitingSync
-            ? 'สัญญาบน Sepolia แสดงว่าปล่อยเงินแล้ว ประวัติรายได้จะอัปเดตเมื่อระบบตรวจยืนยันธุรกรรมจากบล็อก finalized'
-            : 'ระบบจะอัปเดตสถานะเมื่อตรวจพบธุรกรรมที่ตรงกับข้อตกลงในบล็อกที่ Sepolia ยืนยันขั้นสุดท้าย (finalized) แล้ว'}
+            ? 'สัญญาบน Sepolia แสดงว่าปล่อยเงินแล้ว ประวัติรายได้จะอัปเดตเมื่อครบจำนวนบล็อกยืนยัน'
+            : 'ระบบจะอัปเดตสถานะเมื่อตรวจพบธุรกรรมที่ตรงกับข้อตกลงและครบจำนวนบล็อกยืนยัน'}
           </InfoBanner>
         )}
         <div role="status" className={checkedTransaction ? undefined : 'sr-only'}>

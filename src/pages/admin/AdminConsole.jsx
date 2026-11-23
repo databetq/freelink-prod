@@ -14,11 +14,12 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { ErrorState } from '@/components/common/ErrorState'
 import { TableSkeleton } from '@/components/common/LoadingSkeleton'
 import { AccountModerationDialog } from './AccountModerationDialog'
+import { AdminDisputes } from './AdminDisputes'
 import { jobStatus } from '@/constants'
 import { supportStatuses, supportTopics } from '@/constants/support'
 import { formatCurrency, formatDate } from '@/utils/format'
 
-const sections = ['users', 'jobs', 'reports']
+const sections = ['users', 'jobs', 'reports', 'disputes']
 
 export default function AdminConsole() {
   const { section = 'users' } = useParams()
@@ -74,10 +75,13 @@ export default function AdminConsole() {
           { value: 'users', label: 'ผู้ใช้', count: data ? users.length : undefined },
           { value: 'jobs', label: 'ประกาศงาน', count: data ? jobs.length : undefined },
           { value: 'reports', label: 'รายงานปัญหา', count: reports?.length },
+          { value: 'disputes', label: 'ข้อพิพาท Escrow' },
         ]}
       />
 
-      {loading ? (
+      {tab === 'disputes' ? (
+        <AdminDisputes />
+      ) : loading ? (
         <TableSkeleton rows={6} />
       ) : error ? (
         <ErrorState error={error} onRetry={refresh} />

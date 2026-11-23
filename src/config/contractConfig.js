@@ -47,6 +47,7 @@ export const contractConfig = {
     claimAfterReview: 'claimAfterReview',
     refundClient: 'refundClient',
     openDispute: 'openDispute',
+    resolveDispute: 'resolveDispute',
     settleExpiredDispute: 'settleExpiredDispute',
     withdraw: 'withdraw',
     getEscrow: 'getEscrow',

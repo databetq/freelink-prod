@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/common/Button'
 import { allocateMilestones, toSatang } from '@/utils/escrowMilestones'
-import { DAY_MS, milestoneSchedule } from '@/utils/escrowSchedule'
+import { milestoneSchedule } from '@/utils/escrowSchedule'
 import { formatCurrency, formatDate } from '@/utils/format'
 
 function localDateTime(timestamp) {
@@ -17,7 +17,7 @@ const money = (amount) => formatCurrency(amount, { maximumFractionDigits: 2 })
 const checklistItems = (text) => text.split('\n').map((line) => line.trim()).filter(Boolean)
 
 export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan, busy, onPrepare,
-  proposedDeliveryDays, plannedDeadline, minDeadlineDays = 7, deliverables = [] }) {
+  proposedDeliveryDays, plannedDeadline, minDeadlineMinutes = 10080, deliverables = [] }) {
   const [custom, setCustom] = useState(false)
   const [deadline, setDeadline] = useState('')
   const [deadlineError, setDeadlineError] = useState('')
@@ -26,13 +26,16 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
   const [confidential, setConfidential] = useState(true)
   const isSplit = milestones.length > 0
   const canUseProposal = !hasPlan && Boolean(proposedDeliveryDays)
-  const earliest = Date.now() + minDeadlineDays * DAY_MS
+  const minLeadMs = minDeadlineMinutes * 60000
+  const minDays = minDeadlineMinutes / 1440
+  const minLeadLabel = Number.isInteger(minDays) ? `${minDays} วัน` : `${minDeadlineMinutes} นาที`
+  const earliest = Date.now() + minLeadMs
   const canUsePlan = plannedDeadline * 1000 >= earliest
   const useCustomDeadline = custom || (!canUseProposal && !canUsePlan)
   const minimum = localDateTime(earliest)
   const budget = toSatang(project.budget)
   const allocation = isSplit ? allocateMilestones(budget, milestones) : null
-  const deliveryDays = Math.max(proposedDeliveryDays || 0, minDeadlineDays + 1)
+  const deliveryDays = Math.max(proposedDeliveryDays || 0, Math.floor(minDays) + 1)
   const schedule = isSplit ? milestoneSchedule(milestones, planStart, earliest, deliveryDays) : null
 
   function update(id, key, value) {
@@ -71,8 +74,8 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
     const payload = { milestoneNumber, confidential }
     if (isSplit) {
       if (allocation.error || schedule.errors.some(Boolean)) return
-      if (schedule.dates[0] < Date.now() + minDeadlineDays * DAY_MS) {
-        setDeadlineError(`กำหนดส่งงวดแรกต้องห่างจากตอนนี้อย่างน้อย ${minDeadlineDays} วัน กรุณาตรวจสอบวันส่งอีกครั้ง`)
+      if (schedule.dates[0] < Date.now() + minLeadMs) {
+        setDeadlineError(`กำหนดส่งงวดแรกต้องห่างจากตอนนี้อย่างน้อย ${minLeadLabel} กรุณาตรวจสอบวันส่งอีกครั้ง`)
         return
       }
       const checklists = milestones.map((item) => checklistItems(item.checklist))
@@ -89,8 +92,8 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
       }))
     } else if (useCustomDeadline) {
       const selected = Date.parse(deadline)
-      if (!Number.isFinite(selected) || selected < Date.now() + minDeadlineDays * DAY_MS) {
-        setDeadlineError(`เลือกวันและเวลาส่งงานที่ห่างจากตอนนี้อย่างน้อย ${minDeadlineDays} วัน`)
+      if (!Number.isFinite(selected) || selected < Date.now() + minLeadMs) {
+        setDeadlineError(`เลือกวันและเวลาส่งงานที่ห่างจากตอนนี้อย่างน้อย ${minLeadLabel}`)
         return
       }
       payload.deadline = Math.floor(selected / 1000)
@@ -121,7 +124,7 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
         {plannedDeadline && (
           <p className="text-ink-500">
             ตามแผน {formatDate(new Date(plannedDeadline * 1000), { hour: '2-digit', minute: '2-digit' })}
-            {!canUsePlan && ` · เหลือไม่ถึง ${minDeadlineDays} วัน กรุณาเลือกกำหนดส่งใหม่สำหรับรอบนี้`}
+            {!canUsePlan && ` · เหลือไม่ถึง ${minLeadLabel} กรุณาเลือกกำหนดส่งใหม่สำหรับรอบนี้`}
           </p>
         )}
         {useCustomDeadline ? (
@@ -129,12 +132,12 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
             <span>วันและเวลาส่งงาน</span>
             <input className={field} type="datetime-local" required min={minimum} value={deadline}
               onChange={(event) => { setDeadline(event.target.value); setDeadlineError('') }} />
-            <span className="block text-ink-500">{canUsePlan ? 'วันใหม่จะใช้ในข้อตกลงรอบนี้' : `เลือกได้ตั้งแต่อีก ${minDeadlineDays} วัน`}</span>
+            <span className="block text-ink-500">{canUsePlan ? 'วันใหม่จะใช้ในข้อตกลงรอบนี้' : `เลือกได้ตั้งแต่อีก ${minLeadLabel}`}</span>
           </label>
         ) : canUseProposal && (
           <p className="text-ink-500">
-            {proposedDeliveryDays < minDeadlineDays
-              ? `ข้อตกลงนี้จะใช้ระยะเวลาขั้นต่ำ ${minDeadlineDays} วัน แม้ข้อเสนอจะระบุ ${proposedDeliveryDays} วัน`
+            {proposedDeliveryDays < minDays
+              ? `ข้อตกลงนี้จะใช้ระยะเวลาขั้นต่ำ ${minLeadLabel} แม้ข้อเสนอจะระบุ ${proposedDeliveryDays} วัน`
               : 'ระบบจะแสดงวันส่งจริงเมื่อสร้างข้อตกลง โดยนับจากตอนเตรียมข้อตกลง'}
           </p>
         )}
@@ -155,7 +158,7 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
               <p className="text-sm text-ink-500">งวดแรกไม่เกิน 30% และงวดสุดท้ายไม่น้อยกว่า 30% ระบบแบ่งยอดที่เหลือให้งวดที่เลือกคำนวณอัตโนมัติ</p>
               {canUseProposal && <p className="text-sm text-ink-500">
                 คำนวณวันส่งตามข้อเสนอ {proposedDeliveryDays} วัน โดยแบ่งช่วงระหว่างวันที่เลือกเอง
-                {deliveryDays > proposedDeliveryDays && ` · ใช้ ${deliveryDays} วันสำหรับการคำนวณเพื่อให้งวดแรกห่างอย่างน้อย ${minDeadlineDays} วัน`}
+                {deliveryDays > proposedDeliveryDays && ` · ใช้ ${deliveryDays} วันสำหรับการคำนวณเพื่อให้งวดแรกห่างอย่างน้อย ${minLeadLabel}`}
               </p>}
               {milestones.map((item, index) => (
                 <fieldset key={item.id} className="space-y-2 rounded-lg border border-ink/10 p-3">
@@ -200,7 +203,7 @@ export function EscrowPrepareForm({ project, agreement, milestoneNumber, hasPlan
                       <input className={field} type="datetime-local" required min={minimum} value={item.deadline}
                         aria-invalid={Boolean(schedule.errors[index] && item.deadline)}
                         onChange={(event) => update(item.id, 'deadline', event.target.value)} />
-                      <span className="block text-ink-500">{index ? `เลือกหลังงวด ${index}` : `เลือกได้ตั้งแต่อีก ${minDeadlineDays} วัน`}</span>
+                      <span className="block text-ink-500">{index ? `เลือกหลังงวด ${index}` : `เลือกได้ตั้งแต่อีก ${minLeadLabel}`}</span>
                     </label>}
                   </div>
                   {schedule.errors[index] && <p className="text-sm text-rose-600">{schedule.errors[index]}</p>}
