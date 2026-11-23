@@ -244,6 +244,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
                 response = await http.request(method, path, headers=headers, **kwargs)
                 self.assertEqual(response.status_code, expected, response.text)
                 self.assertTrue(response.headers.get("X-Request-ID"))
+                self.assertEqual(response.headers.get("Cache-Control"), "no-store")
                 return response.json() if response.content else None
 
             self.assertEqual((await http.get("/auth/me")).status_code, 401)
@@ -924,6 +925,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
         client, freelancer, arbiter, contract = [f"0x{value:040x}" for value in range(1, 5)]
         settings = get_settings().model_copy(update={
             "escrow_contract_address": contract, "escrow_thb_per_eth": Decimal("1000000"),
+            "escrow_confirmations": None,
         })
         now = int(datetime.now(timezone.utc).timestamp())
         deadline = now + 8 * 86400
@@ -970,6 +972,7 @@ class MarketplaceTest(IsolatedAsyncioTestCase):
 
         transport = ASGITransport(app=app)
         with (patch("app.escrow.get_settings", return_value=settings),
+              patch("app.escrow_chain.get_settings", return_value=settings),
               patch.object(EscrowChain, "call", fake_rpc),
               patch.object(EscrowChain, "policy", return_value=(arbiter, 2, 365 * 86400)),
               patch.object(EscrowChain, "is_occupied", return_value=False),

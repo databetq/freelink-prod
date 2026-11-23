@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from getpass import GetPassWarning
 
@@ -15,7 +16,6 @@ from app.models import AdminCredential, User, UserCredential
 from app.passwords import password_hasher
 
 ROLES = ("client", "freelancer", "admin")
-DEMO_PASSWORD = "FreelinkDemo123"
 DEMO_ACCOUNTS = (
     ("client", "/login", "demo-client@example.net"),
     ("freelancer", "/login", "demo-freelancer@example.net"),
@@ -25,6 +25,10 @@ DEMO_ACCOUNTS = (
 
 def create_demo_accounts() -> None:
     from app.password_auth import PasswordRegistration, provision_password_account
+
+    demo_password = os.environ.get("DEMO_PASSWORD", "")
+    if not 8 <= len(demo_password) <= 128:
+        raise ValueError("Set DEMO_PASSWORD to 8-128 characters before creating demo accounts.")
 
     with Session(get_engine()) as db:
         db.execute(text("SELECT pg_advisory_xact_lock(811719302)"))
@@ -37,7 +41,7 @@ def create_demo_accounts() -> None:
             if existing is not None:
                 user, password_hash = existing
                 try:
-                    password_matches = password_hasher.verify(password_hash, DEMO_PASSWORD)
+                    password_matches = password_hasher.verify(password_hash, demo_password)
                 except VerificationError:
                     password_matches = False
                 if user.role != role or user.status != "active" or not password_matches:
@@ -47,22 +51,23 @@ def create_demo_accounts() -> None:
             name = f"Demo {role.title()}"
             if role == "admin":
                 # Admin provisioning commits all the accounts staged in this session.
-                admin_accounts.provision_admin(db, login, DEMO_PASSWORD, name, f"{login}@example.net", add=None)
+                admin_accounts.provision_admin(db, login, demo_password, name, f"{login}@example.net", add=None)
             else:
-                registration = PasswordRegistration(name=name, email=login, role=role, password=DEMO_PASSWORD)
+                registration = PasswordRegistration(name=name, email=login, role=role, password=demo_password)
                 provision_password_account(db, registration)
         db.commit()
 
-    print(f"{'Role':<12} {'Login page':<14} {'Email or username':<29} Password")
+    print(f"{'Role':<12} {'Login page':<14} Email or username")
     for role, path, login in DEMO_ACCOUNTS:
-        print(f"{role:<12} {path:<14} {login:<29} {DEMO_PASSWORD}")
+        print(f"{role:<12} {path:<14} {login}")
+    print("Every account uses the password in DEMO_PASSWORD.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create a Freelink account in the configured database.")
     parser.add_argument("role", nargs="?", choices=ROLES, help="Prompt for the role if omitted.")
     parser.add_argument("--add", action="store_true", help="Add an admin when one already exists.")
-    parser.add_argument("--demo", action="store_true", help="Set up three demo accounts and print their credentials.")
+    parser.add_argument("--demo", action="store_true", help="Set up three demo accounts with the password in DEMO_PASSWORD.")
     args = parser.parse_args()
     if args.demo and (args.role or args.add):
         parser.error("--demo creates all roles and takes no role or --add.")

@@ -71,6 +71,14 @@ class EscrowChain:
             raise api_error(503, "ESCROW_BLOCK_UNAVAILABLE", "เครือข่ายยังไม่ส่งข้อมูลบล็อกให้ตรวจสอบ")
         return block
 
+    def confirmed_block(self) -> dict:
+        """Return the newest block whose events the backend accepts as settled."""
+        confirmations = get_settings().escrow_confirmations
+        if confirmations is None:
+            return self.block()
+        latest = int(self.block("latest")["number"], 16)
+        return self.block(hex(max(latest - confirmations, 0)))
+
     def contract_read(self, address: str, signature: str, args: bytes = b"", block: str = "latest") -> bytes:
         calldata = hex_hash(signature.encode())[:10] + args.hex()
         result = self.call("eth_call", {"to": address, "data": calldata}, block)

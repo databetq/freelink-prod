@@ -57,7 +57,7 @@ def sync_once() -> None:
         if not ids:
             return
         chain = EscrowChain(http, settings.escrow_chain_id)
-        finalized = chain.block()
+        finalized = chain.confirmed_block()
         for agreement_id in ids:
             try:
                 agreement = db.get(EscrowAgreement, agreement_id, with_for_update={"skip_locked": True})
@@ -85,6 +85,9 @@ def main() -> None:
             logger.warning("Escrow RPC request failed with status %s. Retrying.", exc.status_code)
         except SQLAlchemyError:
             logger.warning("Escrow database request failed. Retrying.")
+        except Exception as exc:
+            # One malformed RPC reply must not stop the process that confirms every payment.
+            logger.error("Escrow sync failed error_type=%s. Retrying.", type(exc).__name__)
         sleep(15)
 
 

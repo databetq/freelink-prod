@@ -12,10 +12,11 @@ class Base(DeclarativeBase):
 
 @lru_cache
 def get_engine() -> Engine:
+    settings = get_settings()
     return create_engine(
-        get_settings().database_url,
+        settings.database_url,
         pool_pre_ping=True,
-        connect_args={"connect_timeout": 3},
+        connect_args={"connect_timeout": settings.database_connect_timeout},
     )
 
 

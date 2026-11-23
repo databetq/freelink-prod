@@ -1,5 +1,24 @@
 # บันทึกงาน Freelink Backend
 
+## 24 พฤศจิกายน 2026 · เตรียม deploy เดโมบน Vercel + Render + Neon
+
+### งานที่เสร็จ
+
+- เพิ่ม `vercel.json` (ส่ง `/api/*` ต่อไป Render, SPA fallback, ปิด CDN cache ของ API, security headers พื้นฐาน) และ `render.yaml` (Web Service ฟรี Singapore, Python 3.12.8, รัน migration, API และ escrow worker ในเครื่องเดียวกัน worker ล้มแล้วเปิดใหม่ใน 5 วินาที) ไม่มีความลับในไฟล์ ค่าลับกรอกในหน้าเว็บ Render
+- เพิ่ม `ESCROW_CONFIRMATIONS` ไม่ตั้งค่า = รอบล็อก finalized เหมือนเดิม ตั้ง 3 = ใช้ latest ย้อน 3 บล็อก (ราว 40 วินาที) สำหรับเดโมบน testnet เท่านั้น เพราะทนต่อ reorg น้อยกว่า ใช้ใน worker, `POST /escrow/transactions` และ `release-progress` ผ่าน `EscrowChain.confirmed_block()`
+- `DATABASE_CONNECT_TIMEOUT` ตั้งค่าได้ (ค่าเดิม 3 วินาที) เพราะ Neon ต้องใช้เวลาตื่น
+- API ส่ง `Cache-Control: no-store` เป็นค่าเริ่มต้น ปลายทางที่กำหนดเองอยู่แล้วใช้ค่าเดิม
+- `escrow_worker.main` จับ exception ที่ไม่คาดคิดแล้วทำต่อ log เฉพาะชนิด error ไม่พิมพ์ข้อความ เพื่อไม่ให้ RPC URL หลุดใน log
+- เอารหัสผ่านบัญชีเดโมออกจากโค้ดและ README `create_account --demo` อ่านจาก `DEMO_PASSWORD` และไม่พิมพ์รหัส
+- หน้าเว็บ: timeout ของ API เพิ่มจาก 20 เป็น 90 วินาที, แสดงข้อความเมื่อคำขอช้ากว่า 4 วินาที, ปฏิเสธคำตอบที่เป็น HTML (หน้ารอเริ่มระบบของโฮสต์) แทนที่จะใช้เป็นข้อมูล
+- เติม `FRONTEND_ORIGIN`, `SESSION_*`, `GOOGLE_*`, `ESCROW_CONFIRMATIONS` ใน `backend/.env.example`
+
+### ผลการทดสอบ
+
+- ก่อนแก้ผ่าน 14 รายการ หลังแก้ผ่าน 18 รายการ (เพิ่ม `tests/test_escrow_chain.py` 4 รายการ และตรวจ `Cache-Control` ในเทสต์เดิม) Frontend test 4 รายการและ `vite build` ผ่าน
+- ซ้อมคำสั่งเปิดระบบจาก `render.yaml` ใน Docker Python 3.12.8 จำกัด 0.1 CPU / 512 MB กับ PostgreSQL 17 เปล่า: migration ถึง `0014`, พร้อมใช้ใน 51 วินาที, ใช้ RAM 159 MB, สมัคร 2.7 วินาที, ล็อกอิน 1.8 วินาที, origin ผิดได้ 403, cookie เป็น Secure + HttpOnly + SameSite=lax, ฆ่า worker แล้วกลับมาเอง ลบ container และ image ที่ใช้ซ้อมแล้ว
+- ยังไม่ได้ทดสอบ: cookie และ Google Login ผ่าน rewrite ของ Vercel จริง, ไฟล์แนบ 5 MB ผ่าน rewrite, หน้าเว็บจริงตอน Render ตื่น และการเชื่อม Neon จริง
+
 ## 23 พฤศจิกายน 2026 · แนบข้อมูลคู่สัญญาใน job, proposal และ project
 
 ### ที่มาของปัญหา

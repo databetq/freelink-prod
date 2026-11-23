@@ -3,6 +3,7 @@ import { AuthProvider } from '@/contexts/AuthContext'
 import { ToastProvider } from '@/contexts/ToastContext'
 import { NotificationProvider } from '@/contexts/NotificationContext'
 import { WalletProvider } from '@/contexts/WalletContext'
+import { ServerStatusNotice } from '@/components/common/ServerStatusNotice'
 import { ToastViewport } from '@/components/common/ToastNotification'
 import { AppRoutes } from '@/routes/AppRoutes'
 
@@ -15,6 +16,7 @@ export default function App() {
             <NotificationProvider>
               <AppRoutes />
             </NotificationProvider>
+            <ServerStatusNotice />
             <ToastViewport />
           </WalletProvider>
         </ToastProvider>

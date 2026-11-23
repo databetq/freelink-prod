@@ -46,10 +46,11 @@ python -m venv .venv
 
 ```powershell
 cd backend
+$env:DEMO_PASSWORD = "ตั้งรหัสผ่านเอง 8 ตัวขึ้นไป"
 .\.venv\Scripts\python.exe -m app.create_account --demo
 ```
 
-โหมด `--demo` ใช้สำหรับฐานข้อมูลพัฒนาที่กำหนดใน `DATABASE_URL` รันซ้ำเพื่อดูข้อมูลเข้าสู่ระบบชุดเดิมได้ ทั้งสามบัญชีใช้รหัสผ่าน `FreelinkDemo123`
+โหมด `--demo` ใช้สำหรับฐานข้อมูลพัฒนาที่กำหนดใน `DATABASE_URL` ทั้งสามบัญชีใช้รหัสผ่านจาก `DEMO_PASSWORD` ซึ่งไม่เก็บใน repo
 
 | บทบาท | อีเมลหรือ username | หน้าเข้าสู่ระบบ |
 | --- | --- | --- |

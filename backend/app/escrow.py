@@ -328,7 +328,7 @@ def read_release_progress(project_id: UUID, db: Db, identity: CurrentIdentity):
 
     with httpx.Client(timeout=5) as http:
         chain = EscrowChain(http, agreement.chain_id)
-        finalized = int(chain.block()["number"], 16)
+        finalized = int(chain.confirmed_block()["number"], 16)
         for tx_hash in pending:
             receipt = chain.call("eth_getTransactionReceipt", tx_hash)
             if receipt and int(receipt["status"], 16) == 1:
@@ -403,7 +403,7 @@ def submit_transaction(project_id: UUID, payload: TransactionRequest, response: 
         tx = get_transaction(db, agreement, tx_hash)
         with httpx.Client(timeout=5) as http:
             chain = EscrowChain(http, agreement.chain_id)
-            reconcile(db, chain, agreement, tx, chain.block())
+            reconcile(db, chain, agreement, tx, chain.confirmed_block())
         db.commit()
     response.status_code = 202 if tx.status == "pending" else 200
     return tx

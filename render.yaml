@@ -1,0 +1,47 @@
+# Render Blueprint สำหรับเดโม (แผนฟรี) ค่าที่เป็น sync: false กรอกในหน้าเว็บ Render ตอนสร้าง
+# แผนฟรีไม่มี background worker จึงรัน escrow worker ในเครื่องเดียวกับ API
+services:
+  - type: web
+    name: freelink-prod-databetq
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      python -m alembic upgrade head
+      && (while true; do python -m app.escrow_worker; sleep 5; done &)
+      && exec python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_CONNECT_TIMEOUT
+        value: "15"
+      - key: FRONTEND_ORIGIN
+        value: https://freelink-prod-databetq.vercel.app
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GOOGLE_REDIRECT_URI
+        value: https://freelink-prod-databetq.vercel.app/api/auth/google/callback
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: ESCROW_CHAIN_ID
+        value: "11155111"
+      - key: ESCROW_CONTRACT_ADDRESS
+        value: "0xFc5037D5399e73460f6EBF0Bdfa5ab2917959305"
+      - key: ESCROW_THB_PER_ETH
+        value: "1000000"
+      - key: ESCROW_CONFIRMATIONS
+        value: "3"
+      - key: ESCROW_RPC_URL
+        sync: false

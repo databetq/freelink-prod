@@ -77,6 +77,8 @@ async def log_request(request: Request, call_next):
         response = await call_next(request)
         status = response.status_code
         response.headers["X-Request-ID"] = request_id
+        # Replies depend on the session, so the CDN in front of the API must not keep them.
+        response.headers.setdefault("Cache-Control", "no-store")
         return response
     finally:
         route = getattr(request.scope.get("route"), "path", "<unmatched>")
