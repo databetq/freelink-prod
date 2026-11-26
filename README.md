@@ -4,6 +4,14 @@ Frontend ของแพลตฟอร์มจ้างงานฟรีแ�
 
 > Frontend ดึงข้อมูลผ่าน FastAPI REST API และใช้ Google Login ผ่าน backend งาน ข้อเสนอ และโปรเจกต์อ่านจาก PostgreSQL ฟีเจอร์ที่ยังไม่มี endpoint จะแจ้งสถานะตาม API
 
+## เอกสารโปรเจกต์
+
+- [คู่มือ Backend](backend/README.md) สำหรับตั้งค่า FastAPI, PostgreSQL และ Google Login พร้อม [บันทึกการพัฒนา Backend](backend/IMPLEMENTATION_LOG.md)
+- [คู่มือ Smart Contract](smart-contact/README.md) สำหรับตั้งค่า Hardhat, ทดสอบ และดูเอกสารออกแบบ Escrow
+- [Checklist การเชื่อมต่อระบบ](docs/INTEGRATION.md) รวมข้อเสนอ API และรายการทดสอบร่วมกัน
+- [แผนเดโมและ Deploy ด้วย Escrow v2](docs/plans/DEPLOY_PLAN.md) จัดทำสำหรับการส่งงานเดือนพฤศจิกายน 2026
+- [แผนพัฒนา Backend และกติกา Escrow v3](docs/plans/BACKEND_PLAN.md)
+
 ---
 
 ## 1. Tech Stack
@@ -176,7 +184,7 @@ Frontend ใช้ REST API ผ่าน Axios และส่ง session cookie
 - `src/services/auth/authService.js` — Google Login และคืน session จาก API
 - `tests/fixtures/` — ข้อมูลและ services จำลองที่ใช้สำหรับทดสอบ
 
-รายละเอียดสัญญา API และ checklist สำหรับเพื่อนร่วมทีมอยู่ใน **[INTEGRATION.md](./INTEGRATION.md)**
+ข้อเสนอรูปแบบ API และรายการทดสอบร่วมกันอยู่ใน [Checklist การเชื่อมต่อระบบ](docs/INTEGRATION.md)
 
 ---
 
@@ -222,7 +230,7 @@ Frontend ใช้ REST API ผ่าน Axios และส่ง session cookie
 
 ## 12. Workflow แนะนำสำหรับทีม
 
-1. อ่าน `INTEGRATION.md` และยืนยัน endpoint/response shape กับทีม Backend
+1. อ่าน [Checklist การเชื่อมต่อระบบ](docs/INTEGRATION.md) และยืนยัน endpoint/response shape กับทีม Backend
 2. ตั้ง `VITE_API_BASE_URL` ให้ตรงกับ FastAPI
 3. แก้ `src/services/api/endpoints.js` ให้ตรงกับ API จริง
 4. ปรับ service ที่เกี่ยวข้อง (โดยไม่ต้องแตะ UI)

@@ -81,6 +81,8 @@ npm run init:admin
 
 เมื่อต้องเพิ่มแอดมินคนถัดไป ผู้ดูแลที่เข้าถึงเครื่อง backend ใช้ `npm run add:admin` ได้ คำสั่ง init จะปฏิเสธหากมี admin อยู่แล้ว และทั้งสองคำสั่งปฏิเสธ username ที่ซ้ำ ผู้ใช้ marketplace ใช้ Google Login ตามเดิม
 
+สำหรับ Neon ให้รันจากโฟลเดอร์หลักด้วย `npm run init:admin -- --neon` หรือ `npm run add:admin -- --neon` แล้ววางเฉพาะ connection URL ในช่องที่ซ่อนข้อความ สคริปต์จะแสดง host และชื่อฐานข้อมูลก่อนถามข้อมูลบัญชี
+
 ### การตรวจสอบ API และ request log
 
 Swagger มีเส้นทาง Google Login, session, งาน, ข้อเสนอและโปรเจกต์ ดูขอบเขตและผลการทดสอบใน [บันทึกงาน](IMPLEMENTATION_LOG.md)

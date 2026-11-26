@@ -1,6 +1,6 @@
 # Backend Starter — Solidity Escrow (Freelink) · native ETH · Escrow v2
 
-เอกสารนี้อิงจาก `INTEGRATION.md` (หัวข้อ 1 และ 8) และจากโค้ด Frontend จริงในไฟล์ zip (`src/config/contractConfig.js`, `src/services/blockchain/*`, `src/pages/client/EscrowPayment.jsx`)
+เอกสารนี้อิงจาก [Checklist การเชื่อมต่อระบบ](../../docs/INTEGRATION.md) (หัวข้อ 1 และ 8) และจากโค้ด Frontend จริงในไฟล์ zip (`src/config/contractConfig.js`, `src/services/blockchain/*`, `src/pages/client/EscrowPayment.jsx`)
 ครอบคลุมเฉพาะส่วน **Smart Contract (Solidity)** ที่เป็นงานของคุณ ส่วน REST API (`/jobs`, `/auth/me` ฯลฯ) เป็นงานของคนที่ทำ Backend/DB
 
 > ⚠️ ชื่อฟังก์ชัน, event, ค่าธรรมเนียม และพารามิเตอร์เป็น **ข้อเสนอ** ที่ยังต้องตกลงกับทีม (ดูหัวข้อ 10)
@@ -1172,7 +1172,7 @@ methods: {
 | 10 | สถานะ `Resolved` และเลข enum ใหม่ | — | ดูตารางหัวข้อ 4.2 |
 | 11 | **ขั้นตอนขอแก้งาน** | มี flow ครบฝั่ง API/UI (ปุ่ม "ขอแก้ไขงาน", สถานะ `revision`, ส่งซ้ำ) แต่ไม่เรียก contract | ปุ่มขอแก้เรียก `requestRevision(escrowId, reason)` · ปุ่มส่งใหม่เปิดเมื่อ on-chain เป็น `Active` · แสดงรอบที่เหลือ (`maxRevisions - revisionCount`) และ deadline ใหม่ · ซ่อนปุ่มเมื่อครบรอบ |
 
-> รายละเอียดจากการตรวจ Frontend จริง (พร้อมเลขบรรทัดและข้อเสนอแก้) อยู่ใน [`FRONTEND_REVIEW_TH.md`](FRONTEND_REVIEW_TH.md) เช่น ตอนนี้ Frontend ส่งยอด **บาท** เข้า `parseUnits` เป็น ETH และไม่ตรวจ network ก่อนส่ง transaction ต้องแก้ก่อนต่อ contract จริง
+> รายละเอียดจากการตรวจ Frontend จริง (พร้อมเลขบรรทัดและข้อเสนอแก้) อยู่ใน [`FRONTEND_REVIEW_TH.md`](archive/FRONTEND_REVIEW_TH.md) เช่น ตอนนี้ Frontend ส่งยอด **บาท** เข้า `parseUnits` เป็น ETH และไม่ตรวจ network ก่อนส่ง transaction ต้องแก้ก่อนต่อ contract จริง
 
 ตัวอย่างโค้ดที่แก้แล้วสำหรับข้อ 1, 2, 6, 7 (แนวทาง ยังไม่ได้ทดสอบกับ Frontend จริง):
 

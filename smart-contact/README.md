@@ -1,11 +1,17 @@
 # Freelink Escrow v2 — Smart Contract (native ETH)
 
 Escrow สำหรับค่าจ้างงาน Freelance บน Ethereum ใช้ native ETH (ทดลองบน Sepolia) สร้างด้วย Hardhat 3 + viem + OpenZeppelin v5
-ออกแบบตาม [`docs/BACKEND_START_ver_0_2.md`](docs/BACKEND_START_ver_0_2.md) (เอกสารฉบับล่าสุด) ส่วน `BACKEND_START_ver.md` เป็นร่างเก่า (ERC-20) ไม่ใช้แล้ว
 
 > **ส่วนที่เพิ่มเกินเอกสาร 0.2:** ขั้นตอนขอแก้งาน `requestRevision` (ตัดสินใจร่วมกันเมื่อ 31 ต.ค. 2026) ทำให้ constructor มี 7 ค่า (เพิ่ม `revisionPeriod`, `maxRevisions`) และ `getEscrow` มีฟิลด์ `revisionCount` เอกสาร 0.2 ยังไม่ได้ปรับตาม
 
 > ⚠️ ยังไม่ผ่าน audit ใช้ได้เฉพาะ testnet/demo ห้ามใช้กับเงินจริง
+
+## เอกสาร Escrow
+
+- [แบบร่าง Escrow v2](docs/BACKEND_START_ver_0_2.md) อธิบายการออกแบบสัญญาที่ใช้ native ETH
+- [คู่มือ Escrow v2](docs/FREELINK_ESCROW_GUIDE_TH.md) อธิบายขั้นตอน คำศัพท์ และตัวเลือกตอนออกแบบ
+- [ร่างกติกา Escrow v3](docs/FREELINK_ESCROW_RULES_TH.md) รวมข้อเสนอสำหรับรุ่นถัดไป
+- เอกสารเก็บถาวร ได้แก่ [ร่าง ERC-20 รุ่นแรก](docs/archive/BACKEND_START_ver.md) และ [รายงานตรวจ Frontend วันที่ 31 ตุลาคม 2026](docs/archive/FRONTEND_REVIEW_TH.md)
 
 ## โครงสร้าง
 

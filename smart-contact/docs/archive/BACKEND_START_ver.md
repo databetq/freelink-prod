@@ -1,6 +1,6 @@
 # Backend Starter — Solidity Escrow (Freelink)
 
-เอกสารนี้อิงจาก `INTEGRATION.md` หัวข้อ 1 (Smart Contract) และหัวข้อ 8 (Blockchain / Escrow)
+เอกสารนี้อิงจาก [Checklist การเชื่อมต่อระบบ](../../../docs/INTEGRATION.md) หัวข้อ 1 (Smart Contract) และหัวข้อ 8 (Blockchain / Escrow)
 ครอบคลุมเฉพาะส่วน **Smart Contract** ที่เป็นงานของคุณ ส่วน REST API (`/jobs`, `/auth/me` ฯลฯ) เป็นงานของคนที่ทำ Backend/DB
 
 > ⚠️ ชื่อฟังก์ชัน, event, สถานะ และพารามิเตอร์ด้านล่างเป็นข้อเสนอที่สอดคล้องกับ placeholder ใน INTEGRATION.md

@@ -2,7 +2,7 @@
 
 เป้าหมายรอบแรกคือให้ client และ freelancer ใช้บัญชีจริงคนละบัญชี แล้วทำงานครบหนึ่งเส้นทางบน Sepolia ตั้งแต่ลงงาน ส่งข้อเสนอ จ้าง ฝาก ETH ยอมรับงาน ส่งงาน จนถึงตรวจรับและปล่อยเงิน หลังรีเฟรชหน้าเว็บ ทั้งสองฝ่ายต้องเห็นข้อมูลจากฐานข้อมูลและสถานะเงินที่ตรงกับ smart contract
 
-เดโมใช้ native ETH บน Sepolia และอัตราบาทต่อ ETH แบบคงที่ **หนึ่งงวดใช้หนึ่ง escrow ต่อรอบการฝาก** งานที่ไม่มีงวดแยกใช้ escrow ก้อนเดียว ใช้ [กติกา Escrow ฉบับละเอียด](smart-contact/docs/FREELINK_ESCROW_RULES_TH.md) เป็นข้ออ้างอิงของ v3 ส่วนสัญญา Sepolia ที่ใช้อยู่ปัจจุบันรองรับ `acceptEscrow` แบบ 4 พารามิเตอร์แล้ว
+เดโมใช้ native ETH บน Sepolia และอัตราบาทต่อ ETH แบบคงที่ **หนึ่งงวดใช้หนึ่ง escrow ต่อรอบการฝาก** งานที่ไม่มีงวดแยกใช้ escrow ก้อนเดียว ใช้ [กติกา Escrow ฉบับละเอียด](../../smart-contact/docs/FREELINK_ESCROW_RULES_TH.md) เป็นข้ออ้างอิงของ v3 ส่วนสัญญา Sepolia ที่ใช้อยู่ปัจจุบันรองรับ `acceptEscrow` แบบ 4 พารามิเตอร์แล้ว
 
 ## กติกา v3 ที่ต้องรองรับ
 
@@ -19,7 +19,7 @@
 
 - สร้าง `backend/` ที่โฟลเดอร์หลัก ใช้ FastAPI และ Pydantic สำหรับ REST API, PostgreSQL กับ SQLAlchemy สำหรับข้อมูล และ Alembic สำหรับ migration อ่าน Sepolia ผ่าน Ethereum JSON-RPC ด้วย `httpx` และถอดรหัส event ด้วย `eth-abi`
 - แบ่ง router เป็น auth, jobs, proposals, projects และ escrow เปิด `GET /health`, `/docs` และ `/openapi.json` ตั้ง CORS ให้รับเฉพาะ origin ของ frontend ที่กำหนด
-- ใช้ `application/json` สำหรับ API หลัก ใช้ชื่อฟิลด์เดิมที่ UI อ่าน เช่น `profileId`, `freelancerWalletAddress` และ `escrowStatus` ตรวจตัวอย่าง response และพฤติกรรมการกรองจาก [INTEGRATION.md](INTEGRATION.md) และ [Axios services](src/services/api/) ก่อนยืนยันใน OpenAPI
+- ใช้ `application/json` สำหรับ API หลัก ใช้ชื่อฟิลด์เดิมที่ UI อ่าน เช่น `profileId`, `freelancerWalletAddress` และ `escrowStatus` ตรวจตัวอย่าง response และพฤติกรรมการกรองจาก [INTEGRATION.md](../INTEGRATION.md) และ [Axios services](../../src/services/api/) ก่อนยืนยันใน OpenAPI
 - กำหนด error body เป็น `message`, `code` และ `errors` ให้ตรงกับ Axios interceptor ใช้ `401` เมื่อยังไม่เข้าสู่ระบบ, `403` เมื่อไม่มีสิทธิ์, `404` เมื่อไม่พบข้อมูล, `409` เมื่อสถานะขัดกับคำขอ และ `422` เมื่อข้อมูลที่ส่งมาไม่ผ่านการตรวจ จัดรูป FastAPI validation error ให้ frontend อ่านได้
 
 | ข้อมูล | สิ่งที่ต้องเก็บ |
@@ -36,7 +36,7 @@
 
 เริ่มด้วย Google Login แบบ redirect และ callback ให้ FastAPI สร้าง session และให้ React โหลดผู้ใช้จาก `GET /auth/me` เมื่อเปิดแอป แผนนี้เสนอ session cookie แบบ `HttpOnly` เปิด `Secure` บน HTTPS ปรับ Axios ให้ส่ง credentials และเพิ่มการป้องกัน CSRF สำหรับคำขอที่เปลี่ยนข้อมูล ใช้ session ตรวจตัวตนและตรวจสิทธิ์การเข้าถึงงานหรือโปรเจกต์ทุกครั้งที่จำเป็น บทบาท admin กำหนดฝั่ง server
 
-สำหรับแอดมินคนแรก ใช้ `npm run init:admin` จากเครื่อง backend และเพิ่มบัญชีถัดไปด้วย `npm run add:admin` แอดมินยืนยันตัวตนด้วย username กับรหัสผ่าน ส่วน client และ freelancer ใช้ Google Login ทั้งสองเส้นทางใช้ `GET /auth/me` และ session cookie ของ FastAPI ตามเดิม [วิธีสร้างบัญชีแอดมิน](backend/README.md)
+สำหรับแอดมินคนแรก ใช้ `npm run init:admin` จากเครื่อง backend และเพิ่มบัญชีถัดไปด้วย `npm run add:admin` แอดมินยืนยันตัวตนด้วย username กับรหัสผ่าน ส่วน client และ freelancer ใช้ Google Login ทั้งสองเส้นทางใช้ `GET /auth/me` และ session cookie ของ FastAPI ตามเดิม [วิธีสร้างบัญชีแอดมิน](../../backend/README.md)
 
 | วิธีและเส้นทาง | พฤติกรรมที่ต้องรองรับ |
 | --- | --- |
@@ -66,7 +66,7 @@
 4. เก็บข้อตกลง JSON ฉบับเดียวตามข้อ 4.1 รวมขอบเขตงาน สิ่งที่ต้องส่ง รายการตรวจรับ รอบแก้ และ `tosVersion` ที่ทั้งสองฝ่ายเห็น ใช้ key เรียงตามตัวอักษร ไม่มี whitespace ส่วนเกิน ใช้ข้อความ UTF-8 แบบ NFC และตัวเลขเงินเป็นสตริง Frontend คำนวณ `termsHash` จากต้นฉบับที่นำมาแสดงให้ผู้ใช้ตรวจและดาวน์โหลด พร้อม checkbox ยอมรับ ToS ก่อนฝากและก่อนรับงาน
 5. ให้ frontend เรียก `quote(amountWei)` ก่อนฝากเพื่อคำนวณค่าจ้างบวกค่าธรรมเนียม แล้วให้ client เซ็น `depositEscrow` ผ่าน MetaMask โดยใช้ข้อตกลงและ ABI ที่ตรงกับ deployment
 
-**เกณฑ์ผ่าน** ทั้งสองฝั่งอ่าน hash ยอด และ deadline ชุดเดียวกัน Frontend ใช้ค่าจาก API ในเส้นทางฝาก แทนสูตรชั่วคราวใน [contractService.js](src/services/blockchain/contractService.js) รายละเอียดการออกแบบอยู่ใน [คู่มือ Escrow ข้อ 4.4–4.5 และ 4.10–4.12](smart-contact/docs/FREELINK_ESCROW_GUIDE_TH.md)
+**เกณฑ์ผ่าน** ทั้งสองฝั่งอ่าน hash ยอด และ deadline ชุดเดียวกัน Frontend ใช้ค่าจาก API ในเส้นทางฝาก แทนสูตรชั่วคราวใน [contractService.js](../../src/services/blockchain/contractService.js) รายละเอียดการออกแบบอยู่ใน [คู่มือ Escrow ข้อ 4.4–4.5 และ 4.10–4.12](../../smart-contact/docs/FREELINK_ESCROW_GUIDE_TH.md)
 
 ## 4. ตรวจธุรกรรมและซิงก์สถานะจาก Sepolia
 
@@ -99,7 +99,7 @@
 | FastAPI สำหรับ Sepolia | `ESCROW_RPC_URL` จากผู้ให้บริการ, `ESCROW_CHAIN_ID=11155111`, `ESCROW_CONTRACT_ADDRESS` จาก deployment และ `ESCROW_THB_PER_ETH` ที่ทีมกำหนด ใช้ผล `finalized` จาก RPC เป็นเกณฑ์ยืนยัน |
 | React | `VITE_API_BASE_URL`, `VITE_CHAIN_ID=11155111`, `VITE_CONTRACT_ADDRESS` |
 
-เก็บ OAuth Client Secret, session secret และ RPC URL ที่มี API key ฝั่ง server การตรวจ receipt และ event ใช้ RPC โดยไม่ต้องใช้ private key ของ deployer Frontend เรียก REST API โดยตรง ส่วน fixture สำหรับทดสอบอยู่ใน `tests/fixtures/` [ตัวอย่าง env ของ frontend](.env.example) · [วิธีส่งมอบ ABI และ address](smart-contact/README.md)
+เก็บ OAuth Client Secret, session secret และ RPC URL ที่มี API key ฝั่ง server การตรวจ receipt และ event ใช้ RPC โดยไม่ต้องใช้ private key ของ deployer Frontend เรียก REST API โดยตรง ส่วน fixture สำหรับทดสอบอยู่ใน `tests/fixtures/` [ตัวอย่าง env ของ frontend](../../.env.example) · [วิธีส่งมอบ ABI และ address](../../smart-contact/README.md)
 
 ## ลำดับลงมือ
 

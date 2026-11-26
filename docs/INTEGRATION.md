@@ -46,7 +46,7 @@ VITE_CONTRACT_ADDRESS=
 VITE_EXPLORER_URL=
 ```
 
-> Smart Contract ใช้ FreelinkEscrow v2 บน Sepolia และ ABI อยู่ที่ `src/config/FreelinkEscrow.abi.json` (สำเนาจาก `smart-contact/abi/`) FastAPI ใช้ `ESCROW_THB_PER_ETH` และส่งยอด wei ของข้อตกลงให้หน้าเว็บ ตาม [วิธีตั้งค่า backend](backend/README.md)
+> Smart Contract ใช้ FreelinkEscrow v2 บน Sepolia และ ABI อยู่ที่ `src/config/FreelinkEscrow.abi.json` (สำเนาจาก `smart-contact/abi/`) FastAPI ใช้ `ESCROW_THB_PER_ETH` และส่งยอด wei ของข้อตกลงให้หน้าเว็บ ตาม [วิธีตั้งค่า backend](../backend/README.md)
 
 - `VITE_*` ถูกฝังใน browser ทั้งหมด → **ห้ามใส่ secret**
 - โหมด dev ใช้ `http://localhost:8000` ถ้าไม่ระบุ URL ให้ตั้ง `VITE_API_BASE_URL` ก่อน build สำหรับระบบที่ deploy
@@ -199,7 +199,7 @@ return apiClient.get(endpoints....).then((r) => r.data)
 
 - FastAPI รับ Google OAuth callback และออก session cookie แบบ HttpOnly
 - React อ่าน `GET /auth/me` ตอนเปิดแอป Response มี `role`, `profileId`, `name` และ `email`
-- ตั้งค่า Google client และ callback ใน [backend/.env](backend/.env.example) โดยใช้ host เดียวกันสำหรับ frontend และ API ในเครื่อง
+- ตั้งค่า Google client และ callback ใน [backend/.env](../backend/.env.example) โดยใช้ host เดียวกันสำหรับ frontend และ API ในเครื่อง
 - **ห้ามเก็บ password/secret ใน frontend**
 
 ---

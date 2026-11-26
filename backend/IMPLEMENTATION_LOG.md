@@ -156,7 +156,7 @@
 
 ### เริ่มเชื่อม backend กับกติกา Escrow v3
 
-- ปรับ [แผน backend](../BACKEND_PLAN.md) ตามกติกา D2–D4 และรอบแก้ต่องาน เพิ่มแผนคีย์ escrow แยกตามงวดและรอบฝาก ข้อตกลง JSON ฉบับเดียว และการตรวจเครือข่าย, contract address และ ABI ก่อนสลับไป v3
+- ปรับ [แผน backend](../docs/plans/BACKEND_PLAN.md) ตามกติกา D2–D4 และรอบแก้ต่องาน เพิ่มแผนคีย์ escrow แยกตามงวดและรอบฝาก ข้อตกลง JSON ฉบับเดียว และการตรวจเครือข่าย, contract address และ ABI ก่อนสลับไป v3
 - เพิ่ม migration `0007`, `GET /wallet/link`, `POST /wallet/challenges` และ `POST /wallet/verifications` ให้คนจ้างและคนรับงานพิสูจน์เจ้าของ Wallet ด้วยลายเซ็น EIP-191 ตรวจข้อความหมดอายุและใช้ซ้ำ รวมทั้งกัน Wallet ผูกพร้อมกันกับหลายบัญชี
 - หน้า Wallet เชื่อม MetaMask เพื่อเซ็นแล้วแสดง address ที่ backend ยืนยัน แนวทางใช้ address ที่ผูกไว้สร้างข้อตกลง escrow และซิงก์ event เป็นช่วงถัดไป
 - ทดสอบ backend กับ PostgreSQL ชั่วคราวผ่าน 11 เคส รวมการยืนยัน Wallet, การใช้คำขอซ้ำพร้อมกัน และการป้องกัน address ซ้ำข้ามบัญชี `alembic check` และ `npm run build` ผ่าน ตรวจ API ที่พอร์ต 8000 แล้ว `/health` ตอบว่า PostgreSQL พร้อมใช้งาน และ OpenAPI แสดง REST endpoint ของ Wallet ครบ การเซ็นผ่าน MetaMask ในเบราว์เซอร์จริงยังไม่ได้ทดสอบ
